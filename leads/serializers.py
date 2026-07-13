@@ -1,0 +1,96 @@
+from rest_framework import serializers
+
+from core.models import User
+
+from .models import Lead, Product
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ('id', 'name', 'description', 'is_active', 'created_at')
+        read_only_fields = ('id', 'created_at')
+
+    def validate_name(self, value):
+        request = self.context['request']
+        products = Product.objects.for_business(request.user.business).filter(name__iexact=value)
+        if self.instance:
+            products = products.exclude(pk=self.instance.pk)
+        if products.exists():
+            raise serializers.ValidationError('A product with this name already exists in this business.')
+        return value
+
+
+class LeadSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    assigned_user_name = serializers.CharField(source='assigned_user.username', read_only=True)
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False, allow_null=True)
+    assigned_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
+
+    class Meta:
+        model = Lead
+        fields = (
+            'id',
+            'customer_name',
+            'phone',
+            'email',
+            'source',
+            'product',
+            'product_name',
+            'stage',
+            'quoted_price',
+            'assigned_user',
+            'assigned_user_name',
+            'lost_reason',
+            'last_activity_at',
+            'closed_at',
+            'created_at',
+            'updated_at',
+        )
+        read_only_fields = ('id', 'stage', 'lost_reason', 'last_activity_at', 'closed_at', 'created_at', 'updated_at')
+
+    def validate(self, attrs):
+        request = self.context['request']
+        business = request.user.business
+
+        if 'stage' in self.initial_data or 'lost_reason' in self.initial_data:
+            raise serializers.ValidationError(
+                'Use the lead transition endpoint to change a stage or lost reason.'
+            )
+
+        product = attrs.get('product')
+        if product and product.business_id != business.id:
+            raise serializers.ValidationError({'product': 'Select a product from your business.'})
+
+        assigned_user = attrs.get('assigned_user')
+        if assigned_user and assigned_user.business_id != business.id:
+            raise serializers.ValidationError({'assigned_user': 'Select a user from your business.'})
+        if assigned_user and not assigned_user.is_active:
+            raise serializers.ValidationError({'assigned_user': 'The assigned user must be active.'})
+        return attrs
+
+
+class LeadTransitionSerializer(serializers.Serializer):
+    stage = serializers.ChoiceField(choices=Lead.Stage.choices)
+    lost_reason = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True)
+
+    def validate(self, attrs):
+        stage = attrs['stage']
+        lost_reason = attrs.get('lost_reason', '')
+        if stage == Lead.Stage.LOST and not lost_reason:
+            raise serializers.ValidationError({'lost_reason': 'A lost lead requires a reason.'})
+        if stage != Lead.Stage.LOST and 'lost_reason' in attrs:
+            raise serializers.ValidationError({'lost_reason': 'A lost reason is only valid for a lost lead.'})
+        return attrs
+
+
+class LeadAssignmentSerializer(serializers.Serializer):
+    assigned_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all())
+
+    def validate_assigned_user(self, user):
+        request = self.context['request']
+        if user.business_id != request.user.business_id:
+            raise serializers.ValidationError('Select a user from your business.')
+        if not user.is_active:
+            raise serializers.ValidationError('The assigned user must be active.')
+        return user
