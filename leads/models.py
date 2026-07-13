@@ -103,4 +103,47 @@ class Lead(TenantScopedModel):
         self.full_clean()
         super().save(*args, **kwargs)
 
+
+class Activity(TenantScopedModel):
+    """A small, append-only record of what happened with a lead."""
+
+    class Kind(models.TextChoices):
+        NOTE = 'note', 'Note'
+        CALL = 'call', 'Call'
+        SITE_VISIT = 'site_visit', 'Site visit'
+        QUOTATION = 'quotation', 'Quotation'
+        STAGE_CHANGE = 'stage_change', 'Stage change'
+        SYSTEM = 'system', 'System'
+
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='activities')
+    kind = models.CharField(max_length=24, choices=Kind.choices, default=Kind.NOTE)
+    content = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='lead_activities',
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-created_at',)
+        indexes = [
+            models.Index(fields=('business', 'lead', 'created_at')),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.business_id and self.lead_id and self.lead.business_id != self.business_id:
+            errors['lead'] = 'The lead must belong to the same business.'
+        if self.business_id and self.created_by_id and self.created_by.business_id != self.business_id:
+            errors['created_by'] = 'The activity author must belong to the same business.'
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f'{self.get_kind_display()} for {self.lead}'
+
 # Create your models here.

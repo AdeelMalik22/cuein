@@ -1,1 +1,9 @@
-{% extends 'web/base.html' %}{% block title %}Settings · Cuein{% endblock %}{% block content %}<section class="page-heading"><div><p class="eyebrow">OWNER CONTROLS</p><h1>Business settings</h1><p class="muted">Your workspace identity and local time.</p></div></section><section class="panel narrow"><form method="post" class="stacked-form">{% csrf_token %}{% for field in form %}<label>{{ field.label }}{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}<button class="primary-button">Save settings</button></form></section>{% endblock %}
+{% extends 'web/base.html' %}
+{% block title %}Business settings · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading"><div><p class="eyebrow">OWNER CONTROLS</p><h1>Business settings</h1><p>Keep your workspace name, industry, and local time accurate.</p></div></section>
+  <section class="settings-layout">
+    <article class="panel settings-panel"><p class="eyebrow">WORKSPACE</p><h2>Business details</h2><p class="panel-intro">Follow-up dates are shown in this business timezone.</p><form method="post" class="stacked-form">{% csrf_token %}{% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}{% for field in form %}<label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}<button class="button button-dark" type="submit">Save settings</button></form></article>
+    <aside class="settings-note"><p class="eyebrow">A SMALL NOTE</p><h2>Clarity starts at the top.</h2><p>These details appear across your team’s workspace and help Cuein show dates in the time your business actually works in.</p></aside>
+  </section>
+{% endblock %}

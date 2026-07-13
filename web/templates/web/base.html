@@ -4,29 +4,83 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
   <title>{% block title %}Cuein{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'web/app.css' %}">
+  <script src="{% static 'web/app.js' %}" defer></script>
+  {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body class="app-body">
   <div class="app-shell">
-    <aside class="sidebar">
-      <a class="brand" href="{% url 'web:dashboard' %}" aria-label="Cuein dashboard">C</a>
-      <nav aria-label="Primary navigation">
-        <a href="{% url 'web:dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" title="Dashboard">⌂</a>
-        <a href="{% url 'web:lead-list' %}" class="nav-item {% if request.resolver_match.url_name == 'lead-list' %}active{% endif %}" title="Leads">◫</a>
-        <a href="{% url 'web:task-list' %}" class="nav-item {% if request.resolver_match.url_name == 'task-list' %}active{% endif %}" title="Follow-ups">✓</a>
-        {% if is_manager %}<a href="{% url 'web:reports' %}" class="nav-item {% if request.resolver_match.url_name == 'reports' %}active{% endif %}" title="Reports">⌁</a>{% endif %}
-        {% if request.user.role == 'owner' %}<a href="{% url 'web:team-list' %}" class="nav-item {% if request.resolver_match.url_name == 'team-list' %}active{% endif %}" title="Team">♙</a>{% endif %}
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="{% if is_salesperson %}{% url 'web:lead-list' %}{% else %}{% url 'web:dashboard' %}{% endif %}" aria-label="Cuein home">
+        <span class="brand-mark">c</span><span class="brand-word">cuein</span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Primary navigation">
+        {% if is_salesperson %}
+          <a href="{% url 'web:lead-list' %}" class="nav-item {% if request.resolver_match.url_name == 'lead-list' or request.resolver_match.url_name == 'lead-detail' or request.resolver_match.url_name == 'lead-create' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M9 9v11"></path></svg><span>My leads</span>
+          </a>
+          <a href="{% url 'web:task-list' %}" class="nav-item {% if request.resolver_match.url_name == 'task-list' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 11l2 2 4-4"></path><path d="M20 12a8 8 0 1 1-4-7.3"></path></svg><span>My tasks</span>
+          </a>
+        {% else %}
+          <a href="{% url 'web:dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"></path></svg><span>Overview</span>
+          </a>
+          <a href="{% url 'web:lead-list' %}" class="nav-item {% if request.resolver_match.url_name == 'lead-list' or request.resolver_match.url_name == 'lead-detail' or request.resolver_match.url_name == 'lead-create' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M9 9v11"></path></svg><span>Leads</span>
+          </a>
+          <a href="{% url 'web:task-list' %}" class="nav-item {% if request.resolver_match.url_name == 'task-list' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 11l2 2 4-4"></path><path d="M20 12a8 8 0 1 1-4-7.3"></path></svg><span>Follow-ups</span>
+          </a>
+          <a href="{% url 'web:reports' %}" class="nav-item {% if request.resolver_match.url_name == 'reports' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V5M8 17v-5M13 17V8m5 9V3"></path></svg><span>Reports</span>
+          </a>
+          {% if is_owner %}
+            <div class="nav-divider" aria-hidden="true"></div>
+            <a href="{% url 'web:team-list' %}" class="nav-item {% if request.resolver_match.url_name == 'team-list' or request.resolver_match.url_name == 'team-edit' %}active{% endif %}">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 20a5.5 5.5 0 0 1 11 0M16 11a3 3 0 1 0-1.2-5.75M16 14.5a5.5 5.5 0 0 1 4.5 5.5"></path></svg><span>Team</span>
+            </a>
+            <a href="{% url 'web:product-list' %}" class="nav-item {% if request.resolver_match.url_name == 'product-list' or request.resolver_match.url_name == 'product-edit' %}active{% endif %}">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m20 7-8 4-8-4 8-4 8 4Zm-16 4 8 4 8-4M4 15l8 4 8-4"></path></svg><span>Services</span>
+            </a>
+            <a href="{% url 'web:business-settings' %}" class="nav-item {% if request.resolver_match.url_name == 'business-settings' %}active{% endif %}">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.63 2.63-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56v.1h-3.72v-.1a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06-2.63-2.63.06-.06A1.7 1.7 0 0 0 5.3 15a1.7 1.7 0 0 0-1.56-1.04h-.1v-3.72h.1A1.7 1.7 0 0 0 5.3 9.2a1.7 1.7 0 0 0-.34-1.87L4.9 7.27l2.63-2.63.06.06a1.7 1.7 0 0 0 1.87.34 1.7 1.7 0 0 0 1.04-1.56v-.1h3.72v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.63 2.63-.06.06a1.7 1.7 0 0 0-.34 1.87 1.7 1.7 0 0 0 1.56 1.04h.1v3.72h-.1A1.7 1.7 0 0 0 19.4 15Z"></path></svg><span>Settings</span>
+            </a>
+          {% endif %}
+        {% endif %}
       </nav>
-      <form method="post" action="{% url 'web:logout' %}" class="logout-form">{% csrf_token %}<button class="nav-item" title="Log out" type="submit">↪</button></form>
+
+      <form method="post" action="{% url 'web:logout' %}" class="logout-form">
+        {% csrf_token %}
+        <button class="nav-item" type="submit">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M13 4h5a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-5"></path></svg><span>Log out</span>
+        </button>
+      </form>
     </aside>
+
     <main class="main-content">
       <header class="topbar">
-        <a class="mobile-brand" href="{% url 'web:dashboard' %}">cuein</a>
-        <div class="business-label">{{ business.name }}</div>
-        <div class="user-menu"><span class="avatar">{{ request.user.username|first|upper }}</span><span>{{ request.user.get_full_name|default:request.user.username }}</span></div>
+        <div class="workspace-identity">
+          <span class="mobile-wordmark">cuein</span>
+          <span class="workspace-name">{{ business.name }}</span>
+          <span class="workspace-role">{{ request.user.get_role_display }}</span>
+        </div>
+        <div class="topbar-user">
+          <span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span>
+          <span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ request.user.email|default:request.user.username }}</small></span>
+        </div>
       </header>
-      {% if messages %}{% for message in messages %}<div class="flash-message">{{ message }}</div>{% endfor %}{% endif %}
+      {% if messages %}
+        <div class="flash-stack" aria-live="polite">
+          {% for message in messages %}<div class="flash-message {{ message.tags }}">{{ message }}</div>{% endfor %}
+        </div>
+      {% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>

@@ -1,21 +1,23 @@
-{% extends 'web/base.html' %}{% block title %}Follow-ups · Cuein{% endblock %}{% block content %}
-    <section class="page-heading">
-        <div><p class="eyebrow">WORK QUEUE</p>
-            <h1>Follow-ups</h1>
-            <p class="muted">Open actions assigned to you{% if is_manager %} and your team{% endif %}.</p></div>
-    </section>
-    <section class="filter-row"><a class="filter {% if not selected_status %}selected{% endif %}"
-                                   href="{% url 'web:task-list' %}">All open</a><a
-            class="filter {% if selected_status == 'pending' %}selected{% endif %}" href="?status=pending">Pending</a><a
-            class="filter {% if selected_status == 'overdue' %}selected{% endif %}" href="?status=overdue">Overdue</a>
-    </section>
-    <section class="panel">
-        <div class="task-list">{% for task in tasks %}
-            <div class="task-row expanded"><span
-                    class="status-dot {% if task.status == 'overdue' %}danger{% endif %}"></span>
-                <div><strong>{{ task.lead.customer_name }}</strong>
-                    <p>{{ task.description }}</p><small>Assigned
-                        to {{ task.assigned_user.get_full_name|default:task.assigned_user.username }}</small></div>
-                <time class="{% if task.status == 'overdue' %}overdue{% endif %}">{{ task.due_at|date:'D, M j · g:i A' }}</time>
-            </div>{% empty %}<p class="empty-state">There are no open follow-ups.</p>{% endfor %}</div>
-    </section>{% endblock %}
+{% extends 'web/base.html' %}
+{% block title %}{% if is_salesperson %}My tasks{% else %}Follow-ups{% endif %} · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div><p class="eyebrow">WORK QUEUE</p><h1>{% if is_salesperson %}My tasks{% else %}Follow-ups{% endif %}</h1><p>{% if is_salesperson %}Finish the action, schedule the next one, and keep your leads moving.{% else %}Open actions across {{ business.name }}, ordered by when they need a nudge.{% endif %}</p></div>
+  </section>
+  <section class="filter-row" aria-label="Filter follow-ups"><a class="filter {% if not selected_status %}selected{% endif %}" href="{% url 'web:task-list' %}">All open</a><a class="filter {% if selected_status == 'pending' %}selected{% endif %}" href="?status=pending">Pending</a><a class="filter {% if selected_status == 'overdue' %}selected{% endif %}" href="?status=overdue">Overdue</a></section>
+  <section class="task-queue-panel">
+    <div class="task-queue-heading"><span>Lead</span><span>Follow-up</span><span>When</span><span>Action</span></div>
+    <div class="task-queue-list">
+      {% for task in tasks %}
+        <article class="task-queue-row {% if task.status == 'overdue' %}is-overdue{% endif %}">
+          <a class="task-lead" href="{% url 'web:lead-detail' task.lead.pk %}"><span class="status-dot {% if task.status == 'overdue' %}is-overdue{% endif %}"></span><span><strong>{{ task.lead.customer_name }}</strong><small>{% if is_manager %}{{ task.assigned_user.get_full_name|default:task.assigned_user.username }}{% else %}{{ task.lead.get_stage_display }}{% endif %}</small></span></a>
+          <p>{{ task.description }}</p>
+          <time>{% if task.status == 'overdue' %}<b>Overdue</b><br>{% endif %}{{ task.due_at|date:'D, M j · g:i A' }}</time>
+          <div class="task-actions"><details class="task-action-details"><summary>Mark as done</summary><form method="post" action="{% url 'web:task-complete' task.pk %}" class="inline-form">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><label class="field"><span>Next follow-up</span><input type="datetime-local" name="next_due_at" required></label><label class="field"><span>Next action</span><textarea name="next_description" rows="2" placeholder="What happens next?" required></textarea></label><button class="button button-dark" type="submit">Done & schedule next</button></form></details><details class="task-action-details"><summary>Reschedule</summary><form method="post" action="{% url 'web:task-reschedule' task.pk %}" class="inline-form">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><label class="field"><span>New time</span><input type="datetime-local" name="due_at" required></label><button class="button button-muted" type="submit">Save new time</button></form></details></div>
+        </article>
+      {% empty %}
+        <div class="task-empty-state"><p class="eyebrow">ALL CLEAR</p><h2>No open follow-ups.</h2><p>When you schedule a next action or a quotation needs a nudge, it will appear here.</p></div>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

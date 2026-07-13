@@ -1,4 +1,19 @@
 {% load static %}
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No workspace · Cuein</title><link rel="stylesheet" href="{% static 'web/app.css' %}"></head>
-<body class="login-page"><main class="login-card"><div class="login-mark">!</div><p class="eyebrow">WORKSPACE REQUIRED</p><h1>This account has no business workspace.</h1><p class="muted">Sign in with a seeded business user, or assign this user to a Business before opening the Cuein dashboard.</p><form method="post" action="{% url 'web:logout' %}">{% csrf_token %}<button class="primary-button" type="submit">Sign out</button></form></main></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workspace required · Cuein</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'web/app.css' %}">
+</head>
+<body class="auth-body auth-login-body">
+  <main class="login-wrap">
+    <a class="wordmark" href="{% url 'web:landing' %}"><span>c</span>uein</a>
+    <section class="auth-card login-card"><div class="auth-card-heading"><p class="eyebrow">WORKSPACE REQUIRED</p><h1>This account has no business workspace.</h1><p>Ask a business owner to add this account, then sign in again.</p></div><form method="post" action="{% url 'web:logout' %}" class="auth-form auth-form-single">{% csrf_token %}<button class="button button-dark" type="submit">Sign out</button></form></section>
+  </main>
+</body>
+</html>
