@@ -17,6 +17,9 @@ from .serializers import (
     LeadTransitionSerializer,
     ProductSerializer,
 )
+from followups.rules import rule_for_stage
+from followups.rules import DELAYED_FOLLOWUP
+from followups.tasks import schedule_follow_up
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -94,7 +97,22 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.last_activity_at = timezone.now()
             lead.full_clean()
             lead.save()
+            rule = rule_for_stage(lead.stage)
+            if rule:
+                transaction.on_commit(
+                    lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), rule.key)
+                )
 
         return Response(LeadSerializer(lead, context={'request': request}).data)
+
+    @action(detail=True, methods=('post',), url_path='needs-time')
+    def needs_time(self, request, pk=None):
+        lead = self.get_object()
+        if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
+            raise ValidationError({'detail': 'Terminal leads cannot receive a follow-up reminder.'})
+        transaction.on_commit(
+            lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), DELAYED_FOLLOWUP.key)
+        )
+        return Response(status=status.HTTP_202_ACCEPTED)
 
 # Create your views here.

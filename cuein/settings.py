@@ -57,6 +57,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'core',
     'leads',
+    'followups',
+    'web',
 ]
 
 MIDDLEWARE = [
@@ -136,6 +138,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATICFILES_DIRS = [BASE_DIR / 'web' / 'static']
+
+LOGIN_URL = 'web:login'
+LOGIN_REDIRECT_URL = 'web:dashboard'
+LOGOUT_REDIRECT_URL = 'web:login'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -154,4 +161,19 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+}
+
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', CELERY_BROKER_URL)
+CELERY_TIMEZONE = 'UTC'
+CELERY_TASK_ALWAYS_EAGER = os.environ.get('CELERY_TASK_ALWAYS_EAGER', '').lower() == 'true'
+CELERY_BEAT_SCHEDULE = {
+    'flag-overdue-follow-up-tasks-hourly': {
+        'task': 'followups.tasks.flag_overdue_tasks',
+        'schedule': 60 * 60,
+    },
+    'schedule-stale-lead-escalations-daily': {
+        'task': 'followups.tasks.schedule_stale_lead_escalations',
+        'schedule': 24 * 60 * 60,
+    },
 }
