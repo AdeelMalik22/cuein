@@ -1,0 +1,4 @@
+{% load static %}
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>No workspace · Cuein</title><link rel="stylesheet" href="{% static 'web/app.css' %}"></head>
+<body class="login-page"><main class="login-card"><div class="login-mark">!</div><p class="eyebrow">WORKSPACE REQUIRED</p><h1>This account has no business workspace.</h1><p class="muted">Sign in with a seeded business user, or assign this user to a Business before opening the Cuein dashboard.</p><form method="post" action="{% url 'web:logout' %}">{% csrf_token %}<button class="primary-button" type="submit">Sign out</button></form></main></body></html>

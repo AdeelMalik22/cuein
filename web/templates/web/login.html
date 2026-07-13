@@ -1,0 +1,4 @@
+{% load static %}
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · Cuein</title><link rel="stylesheet" href="{% static 'web/app.css' %}"></head>
+<body class="login-page"><main class="login-card"><div class="login-mark">C</div><p class="eyebrow">WELCOME BACK</p><h1>Keep every lead moving.</h1><p class="muted">Sign in to manage your follow-ups and sales pipeline.</p>{% if form.errors %}<p class="form-error">Your username or password is incorrect.</p>{% endif %}<form method="post">{% csrf_token %}<label>Username<input type="text" name="username" autocomplete="username" autofocus required></label><label>Password<input type="password" name="password" autocomplete="current-password" required></label><input type="hidden" name="next" value="{{ next }}"><button class="primary-button" type="submit">Sign in</button></form></main></body></html>

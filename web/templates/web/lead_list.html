@@ -1,0 +1,40 @@
+{% extends 'web/base.html' %}{% block title %}Leads · Cuein{% endblock %}{% block content %}
+    <section class="page-heading">
+        <div><p class="eyebrow">PIPELINE</p>
+            <h1>Leads</h1>
+            <p class="muted">Every visible lead, ordered by latest activity.</p></div>
+    </section>
+    <form class="filter-row search-form" method="get"><input name="q" value="{{ search }}"
+                                                             placeholder="Search customer, phone, or email"><select
+            name="stage">
+        <option value="">All stages</option>{% for value, label in stages %}
+        <option value="{{ value }}" {% if selected_stage == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+        <button class="secondary-button" type="submit">Filter</button>
+    </form>
+    <section class="panel">
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Customer</th>
+                    <th>Stage</th>
+                    <th>Product</th>
+                    <th>Assigned to</th>
+                    <th>Last activity</th>
+                </tr>
+                </thead>
+                <tbody>{% for lead in leads %}
+                    <tr>
+                        <td><strong>{{ lead.customer_name }}</strong><small>{{ lead.phone }}</small></td>
+                        <td><span class="stage-pill">{{ lead.get_stage_display }}</span></td>
+                        <td>{{ lead.product|default:'—' }}</td>
+                        <td>{{ lead.assigned_user.get_full_name|default:lead.assigned_user.username }}</td>
+                        <td>{{ lead.last_activity_at|timesince }} ago</td>
+                    </tr>{% empty %}
+                    <tr>
+                        <td colspan="5" class="empty-state">No leads match these filters.</td>
+                    </tr>{% endfor %}</tbody>
+            </table>
+        </div>
+    </section>{% endblock %}

@@ -1,0 +1,34 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Cuein{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'web/app.css' %}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="{% url 'web:dashboard' %}" aria-label="Cuein dashboard">C</a>
+      <nav aria-label="Primary navigation">
+        <a href="{% url 'web:dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" title="Dashboard">⌂</a>
+        <a href="{% url 'web:lead-list' %}" class="nav-item {% if request.resolver_match.url_name == 'lead-list' %}active{% endif %}" title="Leads">◫</a>
+        <a href="{% url 'web:task-list' %}" class="nav-item {% if request.resolver_match.url_name == 'task-list' %}active{% endif %}" title="Follow-ups">✓</a>
+        {% if is_manager %}<a href="{% url 'web:reports' %}" class="nav-item {% if request.resolver_match.url_name == 'reports' %}active{% endif %}" title="Reports">⌁</a>{% endif %}
+        {% if request.user.role == 'owner' %}<a href="{% url 'web:team-list' %}" class="nav-item {% if request.resolver_match.url_name == 'team-list' %}active{% endif %}" title="Team">♙</a>{% endif %}
+      </nav>
+      <form method="post" action="{% url 'web:logout' %}" class="logout-form">{% csrf_token %}<button class="nav-item" title="Log out" type="submit">↪</button></form>
+    </aside>
+    <main class="main-content">
+      <header class="topbar">
+        <a class="mobile-brand" href="{% url 'web:dashboard' %}">cuein</a>
+        <div class="business-label">{{ business.name }}</div>
+        <div class="user-menu"><span class="avatar">{{ request.user.username|first|upper }}</span><span>{{ request.user.get_full_name|default:request.user.username }}</span></div>
+      </header>
+      {% if messages %}{% for message in messages %}<div class="flash-message">{{ message }}</div>{% endfor %}{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>
