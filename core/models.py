@@ -1,9 +1,13 @@
+import uuid
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 
 class Business(models.Model):
     """A customer company: the tenant boundary for its data."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     class Industry(models.TextChoices):
         ACCOUNTING = 'accounting', 'Accounting'
@@ -69,6 +73,7 @@ class TenantScopedQuerySet(models.QuerySet):
 class TenantScopedModel(models.Model):
     """Abstract base for data that must never cross a business boundary."""
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     business = models.ForeignKey(
         Business,
         on_delete=models.CASCADE,
@@ -83,6 +88,7 @@ class TenantScopedModel(models.Model):
 class User(AbstractUser):
     """An authenticated team member belonging to exactly one business in v1."""
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     class Role(models.TextChoices):
         OWNER = 'owner', 'Owner'
         MANAGER = 'manager', 'Manager'
