@@ -1,348 +1,227 @@
-# Implementation Plan — Follow-Up Lead Management Tool
+# Implementation Plan — Cuein Follow-Up Lead Management
+
+**Companion to:** `PRD-FollowUpCRM.md`  
+**Status:** Revised draft v1.1  
+**Last updated:** July 13, 2026
+
+## 1. Delivery Goal and MVP Boundary
+
+Build a mobile-responsive web app for small service businesses that makes the next action for every active lead visible, owned, and scheduled.
+
+The first releasable MVP includes:
+
+- Tenant signup/bootstrap, JWT login, and team invitation.
+- Fixed seven-stage pipeline; lead capture, assignment, and safe stage changes.
+- An append-only lead timeline and a manually created or automated next-action task.
+- A salesperson work queue and an owner/manager dashboard.
+- Three automations: quotation follow-up, delayed follow-up, warranty reminder; plus stale-lead and overdue-task sweeps.
+- Strict tenant isolation and role-based visibility.
+
+Explicitly defer configurable stages, configurable automation rules, WhatsApp/SMS, quotation PDFs, email delivery, native apps, and AI insights. In-app tasks are the notification channel for MVP.
+
+### MVP acceptance criteria
+
+1. An active lead is flagged if it has no open next action. `Won` and `Lost` are excluded.
+2. A salesperson sees only their assigned leads/tasks; an owner or manager sees all data in their business.
+3. A user from another business gets a 404 for direct-object API access and cannot infer another tenant's data from list, report, or background-job results.
+4. Every stage change is recorded once in the timeline, including actor, old stage, new stage, and timestamp.
+5. Automatic reminders are idempotent: retries and repeated updates do not create duplicate open tasks for the same rule/lead.
+6. The core workflow works on a 360px-wide viewport: add lead, log activity, move stage, and complete/re-schedule a task.
+
+## 2. Decisions to Lock Before Scaffolding
+
+| Area | Decision | Why |
+| --- | --- | --- |
+| Backend | Django + Django REST Framework | Admin, auth, ORM and validation suit a CRUD-heavy SaaS. |
+| Database | PostgreSQL in every environment except isolated unit tests | Required for production-like constraints, indexes, and aggregates. |
+| Async | Celery + Redis + Celery Beat | Separates immediate event scheduling from time-based sweeps. |
+| Frontend | React + Vite + TypeScript + Tailwind | Fast, typed, mobile-responsive UI. |
+| API auth | `djangorestframework-simplejwt` | Stateless browser API authentication. Prefer access token in memory and refresh token in an HttpOnly cookie if frontend/backend share a parent domain. |
+| Tenant model | Shared schema, `business_id` on every tenant-owned table | Appropriate operational complexity for SMB SaaS. |
+| User model | Custom Django `User`, created before the first migration | Avoids the high-cost migration of changing `AUTH_USER_MODEL` later. A user belongs to one business in v1. |
+| Notifications | In-app task feed only | Keeps MVP focused; email/WhatsApp becomes an adapter, not a prerequisite. |
+
+Use `followups` as the Django app name rather than `tasks`, which is easily confused with Celery task modules and Python task concepts.
+
+## 3. Architecture and Security Boundaries
+
+```
+React SPA  →  DRF API  →  PostgreSQL
+                │
+                ├── Redis → Celery workers (event follow-ups)
+                └── Celery Beat → workers (daily/hourly sweeps)
+```
+
+### Tenant scoping
+
+- `Business` is the tenant root. All tenant-owned models carry a non-null `business` FK.
+- The authenticated `request.user.business` is the only tenant source for HTTP requests. Never accept `business_id` from a client payload.
+- Each tenant-owned ViewSet inherits a single `TenantScopedViewSetMixin`. Its `get_queryset()` always filters by `request.user.business`; `perform_create()` assigns that business server-side.
+- Object lookups must use that scoped queryset, producing 404 rather than exposing cross-tenant object existence.
+- Do **not** use a request/thread-local "current tenant" manager. It is fragile in admin, scripts, async work, and tests. Use explicit `.for_business(business)` querysets plus the ViewSet mixin.
+- Serializers validate that every related object (product, assignee, lead) belongs to the authenticated user's business.
+- Celery tasks accept primitive IDs, then fetch with both primary key and `business_id`. Periodic tasks iterate businesses explicitly.
+- The Django admin must scope tenant-owned querysets and foreign-key choices to the admin user's business, or be restricted to a superuser-only internal console.
 
-**Companion to:** PRD-FollowUpCRM.md **Status:** Draft v1.0 **Last updated:** July 13, 2026
+### Roles
 
-This document translates the PRD into a concrete, buildable plan: tech stack, architecture, data model, folder structure, and a phased build order. It's meant to be followed top-to-bottom during implementation.
+| Capability | Owner | Manager | Salesperson |
+| --- | --- | --- | --- |
+| View business leads/tasks | all | all | assigned only |
+| Create leads | yes | yes | yes (self-assigned by default) |
+| Reassign leads/tasks | yes | yes | no |
+| Manage team/settings | yes | optional | no |
+| View reports/dashboard | all | all | personal queue only |
 
----
+Keep role checks in named DRF permission classes and queryset filters, not only hidden frontend controls.
 
-## 1\. Tech Stack Decisions
+## 4. Data Model and Invariants
 
-| Layer | Choice | Reasoning |
-| :---- | :---- | :---- |
-| Backend framework | **Django \+ Django REST Framework (DRF)** | Batteries-included (auth, admin, ORM), fast to build multi-tenant CRUD-heavy apps, matches existing experience. |
-| Background jobs / scheduling | **Celery** \+ **Redis** (broker \+ result backend) | Needed for stage-triggered reminders, daily "no activity" escalation sweeps, and warranty reminders. Celery Beat handles periodic checks. |
-| Database | **PostgreSQL** | Strong relational integrity for tenant-scoped FKs, good indexing support, JSONField available if needed for flexible notes/metadata. |
-| Frontend | **React (Vite) \+ Tailwind**, mobile-responsive | Lightweight, fast to iterate, no native app needed for v1. Kanban board \+ forms are straightforward with a component library. |
-| Auth | **DRF Token/JWT auth** (e.g., `djangorestframework-simplejwt`) | Standard, supports mobile-friendly stateless auth. |
-| Notifications (v1) | **Email** (e.g., via SMTP/SendGrid) \+ **in-app notification feed** | Lowest integration cost to ship MVP. WhatsApp Business API evaluated in Phase 2 (see Open Questions in PRD). |
-| Hosting (initial) | Single VPS or small managed Postgres \+ app server (e.g., Railway/Render/DigitalOcean) | Avoid over-engineering infra before there are paying tenants. |
-| Task queue infra | Redis (single instance to start) | Doubles as Celery broker; can add persistence/replication later. |
+### Core models
 
----
+| Model | Important fields | Constraints / notes |
+| --- | --- | --- |
+| `Business` | name, industry, is_active, created_at | Tenant root. |
+| `User` | business, role, phone, email, is_active | Custom `AbstractUser`; one business per user in v1. |
+| `Product` | business, name, description, is_active | Unique name per business. |
+| `Lead` | business, customer_name, phone, email, source, product, stage, quoted_price, assigned_user, lost_reason, created_at, updated_at, last_activity_at, closed_at | `lost_reason` required for Lost; `closed_at` set for Won/Lost. `last_activity_at` is denormalized for efficient stale checks. |
+| `Activity` | business, lead, type, content, metadata, created_by, created_at | Append-only. `metadata` stores structured stage data such as `{from, to}`. |
+| `FollowUpTask` | business, lead, assigned_user, due_at, description, status, rule_key, created_at, completed_at | `status`: pending, done, overdue, cancelled. `rule_key` supports idempotency. |
+| `Notification` | business, recipient, task, read_at, created_at | MVP in-app feed; create when a task is due/overdue, not as a transport abstraction yet. |
 
-## 2\. Multi-Tenancy Implementation Plan
+`FollowUpRule` is not a model in MVP. Keep default offsets in one versioned Python module (`followups/rules.py`) and record its stable `rule_key` on generated tasks. Add per-business configuration only after pilots validate the defaults.
 
-Per the PRD (Section 12.1), tenancy \= shared DB/schema \+ `business` FK on every scoped model.
+### Required database indexes and constraints
 
-**Step-by-step:**
+- `Lead`: `(business, stage)`, `(business, assigned_user, last_activity_at)`, `(business, created_at)`.
+- `FollowUpTask`: `(business, assigned_user, due_at, status)`, `(business, lead, status)`.
+- `Activity`: `(business, lead, created_at)`.
+- `Product`: unique `(business, name)`.
+- Partial unique constraint for automated tasks: one non-terminal task per `(business, lead, rule_key)`. If the database/version makes the exact conditional constraint awkward, enforce with a transaction and document it; PostgreSQL partial uniqueness is preferred.
+- Check constraints for non-negative quoted price and a valid `closed_at`/terminal stage relationship where practical. Keep the conditional Lost reason validation in the serializer/model `clean()` as it is text-based.
 
-1. Create a `Business` model as the tenant root (name, industry type, created\_at, is\_active, plan/tier placeholder).  
-2. Create a `Membership`/custom `User` model linking Django's auth user to a `Business` \+ `role` (`owner`, `manager`, `salesperson`).  
-3. Build a `TenantScopedModel` abstract base class: adds `business = models.ForeignKey(Business, on_delete=models.CASCADE)` and a custom manager.  
-4. Build `TenantScopedManager` / `TenantScopedQuerySet`: exposes `.for_business(business)` and is wired into a DRF permission/mixin so every ViewSet auto-filters by `request.user.business`.  
-5. Add a DRF `IsSameTenant` permission class \+ a `TenantScopedViewSetMixin` that all lead/activity/task viewsets inherit — no viewset should manually write `.filter(business=...)`; it should be automatic and impossible to forget.  
-6. Add middleware or a DRF authentication step that attaches `request.business` from the authenticated user (never from client-supplied params).  
-7. All Celery tasks accept `business_id` explicitly as an argument and re-scope their queries — no reliance on request context.  
-8. Add composite indexes: `(business_id, stage)`, `(business_id, assigned_user_id, due_date)`, `(business_id, created_at)`.  
-9. Write cross-tenant isolation tests **before** building UI features — e.g., "User from Business A cannot fetch/update a Lead belonging to Business B" (expect 404, not data).
+### State-transition policy
 
----
+- The API owns transitions. `Lead.stage` cannot be modified through a generic serializer update; use `POST /api/leads/{id}/transition/` with `stage`, `lost_reason` when applicable, and optional note.
+- Permit forward progression and terminal transitions in MVP; reopening a Won/Lost lead is owner/manager-only and must include a note. Record the allowed-transition matrix in code and test it.
+- In one `transaction.atomic()` block: lock the lead, validate the transition, update the lead, create one stage activity, update `last_activity_at`, and register automation work with `transaction.on_commit()`.
+- Use `on_commit()` rather than a `post_save` signal. Signals cannot reliably determine the previous stage and may enqueue work for rolled-back transactions.
+- Logging a call, note, site visit, or quotation activity updates `last_activity_at`. A system-generated reminder does not count as customer activity.
 
-## 3\. Data Model (Concrete Schema Sketch)
+## 5. Automation Design
 
-Business
+| Rule key | Event | Result | Default |
+| --- | --- | --- | --- |
+| `quote_followup_v1` | transition to `quotation_sent` | Open task for assigned salesperson | due in 2 days |
+| `delayed_followup_v1` | explicit “customer needs time” action | Open task for assigned salesperson | due in 7 days |
+| `warranty_checkin_v1` | transition to `won` | Open task for assigned salesperson | due in 11 months |
+| `stale_lead_escalation_v1` | daily sweep | Open task for an owner/manager | no activity for 10 days |
+| `overdue_flag_v1` | hourly sweep | mark past-due open tasks overdue; create in-app notification | after `due_at` |
 
-  \- id
+Implementation requirements:
 
-  \- name
+- The synchronous API transaction enqueues a small Celery task after commit. The worker creates the task through an idempotent service function.
+- A completed/cancelled task is terminal. Completing a task should prompt for either a logged outcome or a newly scheduled next action; the API must still flag the lead when none exists.
+- Before scheduling a stale escalation, exclude terminal stages and leads that already have an open stale-escalation task.
+- Store datetimes in UTC. Render them in each user/business timezone (start with an explicit `Business.timezone`, default `Asia/Karachi`). Define “today” using that timezone.
+- Periodic sweeps must be safe to run multiple times. Test task creation under retry and concurrent-worker conditions.
 
-  \- industry (choice: solar, cctv, ac\_installation, real\_estate, construction, furniture, other)
+## 6. API Contract (MVP)
 
-  \- created\_at
+Use `/api/v1/`; paginate lists; return ISO-8601 UTC timestamps. List endpoints are scoped before filtering, ordering, or aggregation.
 
-  \- is\_active
+| Area | Endpoints |
+| --- | --- |
+| Auth | `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /me` |
+| Team | `GET/POST /users`, `PATCH /users/{id}` (owner/manager scope) |
+| Products | `GET/POST /products`, `PATCH /products/{id}` |
+| Leads | `GET/POST /leads`, `GET/PATCH /leads/{id}`, `POST /leads/{id}/transition`, `POST /leads/{id}/needs-time`, `GET /leads/{id}/timeline` |
+| Activities | `POST /leads/{id}/activities` |
+| Tasks | `GET /follow-up-tasks?due=today&status=pending`, `POST /follow-up-tasks`, `PATCH /follow-up-tasks/{id}` (complete, reschedule, reassign) |
+| Dashboard | `GET /dashboard/summary` |
+| Reports | `GET /reports/conversion-by-source`, `.../by-salesperson`, `.../time-to-close`, `.../lost-reasons` |
 
-User (extends Django auth user or a Profile model)
+Define request/response examples in an OpenAPI schema and generate or validate the frontend API client from it. Error responses should be field-addressable (`{ "lost_reason": ["Required when stage is lost."] }`) and use consistent 401/403/404 semantics.
 
-  \- id
+## 7. Frontend Scope
 
-  \- business (FK \-\> Business)
+Deliver screens in workflow order:
 
-  \- role (choice: owner, manager, salesperson)
+1. Login and initial business/team setup.
+2. “My day” task queue: due, overdue, complete, reschedule, and quick activity logging.
+3. Lead quick-add and lead detail, with timeline and next-action status prominent.
+4. Pipeline board: desktop drag/drop; mobile stage selector; assignment and basic filters.
+5. Owner/manager dashboard: due/overdue, pipeline value, stalled leads, salesperson summary.
+6. Reports with accessible tables first; charts only where they improve scanning.
 
-  \- phone
+Use optimistic UI only for reversible actions; refetch/rollback on failure. Never assume a role from client state—the API response is authoritative. Include loading, empty, error, and no-permission states for each primary screen.
 
-  \- is\_active
+## 8. Build Order, Exit Criteria, and Estimated Sequence
 
-Product
+### Phase 0 — Project foundation
 
-  \- id
+- Configure environment variables, PostgreSQL, Redis, CORS/CSRF, JWT, custom user model, and Docker Compose for local services.
+- Add health/readiness endpoints, structured application logging, `.env.example`, and a CI workflow running format, lint, migrations check, and tests.
+- Create `Business`, `User`, tenant ViewSet mixin, role permissions, and tenant isolation test fixtures.
 
-  \- business (FK \-\> Business)
+**Exit:** a user can authenticate; every tenant-scoped list/detail request is demonstrably isolated; `makemigrations --check` and CI pass.
 
-  \- name
+### Phase 1 — Lead workflow walking skeleton
 
-  \- description (optional)
+- Build Product, Lead, Activity and transition service/API.
+- Implement manual activities, lead assignment, timeline, quick-add, detail page, and mobile-safe pipeline board.
+- Add the “active lead without next action” indicator, initially backed by manually created tasks.
 
-Lead
+**Exit:** a salesperson can create and progress a lead end-to-end, see a complete timeline, and cannot access a colleague’s lead; manager can reassign it.
 
-  \- id
+### Phase 2 — Follow-up engine
 
-  \- business (FK \-\> Business)
+- Add `FollowUpTask`, rule constants, idempotent scheduling service, Celery worker/Beat, overdue and stale sweeps, and in-app notification feed.
+- Make task completion/rescheduling preserve the next-action invariant.
 
-  \- customer\_name
+**Exit:** all five rules work under normal and retried execution, and periodic sweep tests use frozen time.
 
-  \- phone
+### Phase 3 — Management visibility
 
-  \- email (optional)
+- Implement dashboard queries and role-aware frontend views.
+- Add server-side filters, pagination, and indexes; capture query counts for key dashboard endpoints.
 
-  \- source (choice: referral, facebook, walk\_in, website, call, other)
+**Exit:** owner sees accurate current metrics and salesperson sees only their personal work queue.
 
-  \- product (FK \-\> Product, nullable)
+### Phase 4 — Reports and pilot hardening
 
-  \- stage (choice: new\_inquiry, contacted, site\_visit, quotation\_sent, negotiation, won, lost)
+- Add aggregate reports, onboarding, seed/demo data, audit-friendly admin access, and error monitoring.
+- Run usability testing with 2–3 pilot businesses and adjust copy/default reminders—not schema—unless evidence requires it.
 
-  \- quoted\_price (nullable decimal)
+**Exit:** first business can create a tenant, invite a team member, and log its first lead in under 15 minutes without developer help.
 
-  \- assigned\_user (FK \-\> User)
+## 9. Test Strategy
 
-  \- lost\_reason (nullable text, required if stage \== lost)
+| Priority | Coverage |
+| --- | --- |
+| P0 | Cross-tenant reads, writes, related-object assignment, reports, admin scope, and Celery task scoping. |
+| P0 | Role visibility and reassignment rules. |
+| P0 | Transition validation, Lost reason, one timeline event per transition, transaction rollback behavior. |
+| P0 | Automation idempotency, retries, timezone boundaries, stale/overdue sweeps. |
+| P1 | Dashboard/report aggregate correctness and pagination/filter behavior. |
+| P1 | Browser tests for quick-add → transition → task completion on mobile viewport. |
+| P2 | Load tests for daily sweeps and dashboard with representative tenant data. |
 
-  \- created\_at
+Use factories that always require an explicit business. Do not create unscoped tenant models in tests. Test API behavior rather than only managers so the actual security boundary is covered.
 
-  \- updated\_at
+## 10. Operations, Privacy, and Release Readiness
 
-Activity  (the "timeline")
+- Secrets come only from environment/secret management; never commit `.env` files or JWT keys.
+- Back up PostgreSQL daily and test a restore before pilot. Redis is disposable broker state, not the system of record.
+- Enable TLS, secure cookies where applicable, allowed-host/CORS configuration, rate limits on login, and production error monitoring.
+- Log request ID, user ID, business ID, and action outcome without storing notes/phone numbers in logs. Treat lead data as customer personal data.
+- Add a minimal audit record for assignment, stage, and task-status changes. The Activity timeline is product history, not a complete security audit trail.
+- Publish a deployment runbook: migrate, collect static assets, start web/worker/beat, smoke-test login and scheduled jobs, and rollback procedure.
 
-  \- id
+## 11. Decisions Deferred to Pilot Evidence
 
-  \- business (FK \-\> Business)
-
-  \- lead (FK \-\> Lead)
-
-  \- type (choice: call, note, site\_visit, stage\_change, quotation\_sent, email, system)
-
-  \- content (text)
-
-  \- created\_by (FK \-\> User)
-
-  \- created\_at
-
-Task (the "reminder" / next action)
-
-  \- id
-
-  \- business (FK \-\> Business)
-
-  \- lead (FK \-\> Lead)
-
-  \- assigned\_user (FK \-\> User)
-
-  \- due\_date
-
-  \- description
-
-  \- status (choice: pending, done, overdue, escalated)
-
-  \- created\_by\_rule (nullable — tags which automation rule created it, for traceability)
-
-  \- created\_at
-
-  \- completed\_at (nullable)
-
-FollowUpRule (per-business configurable automation — Phase 1.5, can hardcode defaults first)
-
-  \- id
-
-  \- business (FK \-\> Business)
-
-  \- trigger (choice: stage\_quotation\_sent, customer\_requested\_time, inactivity\_10\_days, deal\_won)
-
-  \- offset\_days (integer)
-
-  \- notify\_role (choice: assigned\_salesperson, sales\_manager)
-
-**Notes:**
-
-- `lost_reason` should be enforced at the serializer/validation layer: cannot set `stage=lost` without a `lost_reason`.  
-- Every `stage` transition on `Lead` should auto-create an `Activity` record (`type=stage_change`) — this is what powers the timeline view without extra manual logging.  
-- `FollowUpRule` can be hardcoded as Python constants for the very first MVP milestone, then migrated into a real per-business configurable table in Phase 1.5 — don't block MVP on building a rules engine.
-
----
-
-## 4\. Core Automation Logic (Celery Task Design)
-
-| Event | Trigger mechanism | Task |
-| :---- | :---- | :---- |
-| Lead moved to `quotation_sent` | Django signal (`post_save` on Lead, stage changed) → enqueues Celery task | `schedule_quote_followup(lead_id, business_id)` creates a `Task` due in 2 days |
-| Customer says "thinking about it" | Manual action in UI (button: "Customer needs time") → same signal pattern | `schedule_delayed_followup(lead_id, business_id)` creates a `Task` due in 7 days |
-| No activity for 10 days | **Celery Beat periodic task** (runs daily) | `check_stale_leads()` — scans all businesses' leads with `last_activity > 10 days ago` and no `Won`/`Lost` stage, creates escalation `Task` assigned to the sales manager role |
-| Deal marked `Won` | Signal on stage change to `won` | `schedule_warranty_reminder(lead_id, business_id)` creates a `Task` due in 11 months (or per-product override later) |
-| Task becomes overdue | **Celery Beat periodic task** (runs daily/hourly) | `flag_overdue_tasks()` — updates `status=overdue` on tasks past `due_date`, surfaces them on the dashboard |
-
-**Design principle:** Signals handle "instant, event-driven" scheduling (stage changes). Celery Beat periodic tasks handle "time-based sweep" logic (stale leads, overdue flags) — these can't be triggered by a signal since nothing "happens" to cause them; they're detected by the passage of time.
-
----
-
-## 5\. API Surface (v1 endpoints, illustrative)
-
-Auth
-
-  POST   /api/auth/login/
-
-  POST   /api/auth/refresh/
-
-Leads
-
-  GET    /api/leads/                  (filtered to request.user.business automatically)
-
-  POST   /api/leads/
-
-  GET    /api/leads/{id}/
-
-  PATCH  /api/leads/{id}/             (stage changes go through here)
-
-  GET    /api/leads/{id}/timeline/    (returns Activities, chronological)
-
-Activities
-
-  POST   /api/leads/{id}/activities/  (log a call/note manually)
-
-Tasks
-
-  GET    /api/tasks/?due=today
-
-  GET    /api/tasks/?overdue=true
-
-  PATCH  /api/tasks/{id}/             (mark done, reassign)
-
-Dashboard
-
-  GET    /api/dashboard/summary/      (today's tasks, overdue count, pipeline value, stalled leads, per-salesperson stats)
-
-Reports
-
-  GET    /api/reports/conversion-by-source/
-
-  GET    /api/reports/conversion-by-salesperson/
-
-  GET    /api/reports/avg-time-to-close/
-
-  GET    /api/reports/lost-reasons/
-
----
-
-## 6\. Phased Build Order
-
-### Phase 0 — Foundations (before any feature work)
-
-- Repo setup, Django project scaffold, Postgres \+ Redis running locally/docker-compose.  
-- `Business`, `User`/`Membership`, tenant-scoping base classes and mixins.  
-- Auth (login/JWT).  
-- Cross-tenant isolation test suite scaffold (write these tests early — they should fail loudly if scoping is ever broken).
-
-### Phase 1 — Core Lead Pipeline (MVP walking skeleton)
-
-- `Lead` model \+ CRUD API, scoped to tenant.  
-- Kanban board UI: view leads by stage, move between stages.  
-- `Activity` model \+ auto-logging on stage change \+ manual "add note/call" logging.  
-- Lead detail/timeline view (frontend).
-
-### Phase 2 — Automation Engine
-
-- `Task` model.  
-- Signal-based task creation for: quotation sent → 2-day reminder, "customer needs time" → 7-day reminder, won → warranty reminder.  
-- Celery \+ Redis wired up; Celery Beat periodic tasks: stale-lead escalation, overdue flagging.  
-- In-app notification feed for due/overdue tasks.
-
-### Phase 3 — Owner/Manager Dashboard
-
-- Dashboard summary endpoint \+ frontend view: today's tasks, overdue follow-ups, pipeline value, per-salesperson activity, stalled leads.  
-- Role-based visibility (salesperson sees own leads; owner/manager sees all).
-
-### Phase 4 — Reporting & Pattern Insights
-
-- Conversion rate by source, by salesperson.  
-- Average time-to-close by product.  
-- Lost-reason breakdown.  
-- (Keep as straightforward aggregate queries/charts — no ML needed for v1.)
-
-### Phase 5 — Polish & Pilot Readiness
-
-- Onboarding flow (business signup → invite team → done in \<15 min, per PRD goal).  
-- Email notification delivery for reminders (or evaluate WhatsApp Business API feasibility — see PRD Open Questions).  
-- Basic per-business settings (follow-up day offsets, if time allows — otherwise defer to Phase 1.5/6).  
-- Pilot with 2–3 real businesses; collect feedback on stage names, reminder timing defaults, and missing fields.
-
-### Phase 6+ (Post-pilot, per PRD Section 7\)
-
-- WhatsApp Business API lead capture integration.  
-- Configurable pipeline stages per business.  
-- Quotation builder/PDF generator.  
-- AI-generated weekly summaries.  
-- Native mobile app / push notifications.
-
----
-
-## 7\. Suggested Folder Structure (Django \+ DRF)
-
-project/
-
-├── config/                  \# settings, urls, celery.py, wsgi/asgi
-
-├── core/                    \# Business, User/Membership, TenantScopedModel, mixins/permissions
-
-├── leads/                   \# Lead, Product models \+ serializers/viewsets
-
-├── activities/              \# Activity model \+ serializers/viewsets
-
-├── tasks/                   \# Task model, Celery tasks, signals
-
-├── dashboard/                \# dashboard summary aggregation views
-
-├── reports/                  \# reporting/aggregate query views
-
-├── notifications/            \# in-app \+ email delivery
-
-└── tests/
-
-    ├── test\_tenant\_isolation.py   \# cross-tenant access tests (priority \#1)
-
-    ├── test\_lead\_pipeline.py
-
-    ├── test\_automation\_tasks.py
-
-    └── test\_dashboard.py
-
-frontend/
-
-├── src/
-
-│   ├── pages/ (Dashboard, Pipeline/Kanban, LeadDetail, Reports)
-
-│   ├── components/ (KanbanBoard, LeadCard, Timeline, TaskList)
-
-│   ├── api/ (API client wrappers)
-
-│   └── styles/ (Tailwind config — minimal black/white/gray theme)
-
----
-
-## 8\. Testing Priorities (in order)
-
-1. **Cross-tenant isolation** — non-negotiable, write first, run on every CI build.  
-2. **Stage transition → activity/task automation** — verify each automation rule fires correctly and only once.  
-3. **Celery Beat periodic tasks** — stale-lead detection and overdue flagging correctness (use time-freezing in tests, e.g., `freezegun`).  
-4. **Dashboard aggregation accuracy** — pipeline value sums, overdue counts match underlying data.  
-5. **Role-based access** — salesperson cannot see/edit another salesperson's leads unless owner/manager.
-
----
-
-## 9\. Definition of Done for MVP (ties back to PRD Success Metrics)
-
-- A lead can move through all 7 stages with every transition logged automatically to its timeline.  
-- Quotation-sent, delayed-response, and won-stage automations correctly create tasks with the right due dates.  
-- Stale leads (10+ days no activity) are automatically escalated to the manager role.  
-- Owner dashboard shows: today's tasks, overdue count, pipeline value, per-salesperson stats — refreshed in real time (or near-real-time).  
-- Onboarding a new business (create tenant → invite team → log first lead) takes under 15 minutes with zero external help.  
-- Cross-tenant isolation test suite passes with 100% coverage on all tenant-scoped models.
-
----
-
-## 10\. Open Implementation Questions (carry over from PRD, technical framing)
-
-1. Email vs. WhatsApp for v1 notifications — decide before Phase 2, since it affects the `notifications/` module design.  
-2. Should `FollowUpRule` be a real configurable table in MVP, or hardcoded constants until Phase 1.5? (Recommendation: hardcode first, avoid building a rules engine before real usage data justifies it.)  
-3. Pilot vertical selection (solar/CCTV/real estate/construction) — affects sample data, field choices (e.g., `source`, `product`), and copy/language used during onboarding.
-
+1. Whether v1.1 needs email, WhatsApp, or SMS—validate which channel pilot users actually act on.
+2. Per-business configurable follow-up rules and pipeline stages.
+3. Multi-business memberships for consultants/franchise owners; current v1 intentionally supports one business per user.
+4. Industry-specific fields, warranty durations, and lead sources.
+5. Retention/deletion policy and regional compliance requirements before broad commercial launch.
