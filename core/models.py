@@ -59,6 +59,27 @@ class Business(models.Model):
         return self.name
 
 
+class TenantScopedQuerySet(models.QuerySet):
+    """Query helper for models that belong to a single business."""
+
+    def for_business(self, business):
+        return self.filter(business=business)
+
+
+class TenantScopedModel(models.Model):
+    """Abstract base for data that must never cross a business boundary."""
+
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        related_name='%(app_label)s_%(class)s_set',
+    )
+    objects = TenantScopedQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+
+
 class User(AbstractUser):
     """An authenticated team member belonging to exactly one business in v1."""
 
