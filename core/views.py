@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError
@@ -6,9 +7,22 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Business, User
+from .email_verification import (
+    activate_pending_registration,
+    EmailVerificationDeliveryError,
+    EmailVerificationError,
+    send_email_verification,
+)
+from .models import Business, PendingRegistration, User
 from .permissions import IsBusinessOwner
-from .serializers import BusinessSerializer, CurrentUserSerializer, SignupSerializer, TeamUserSerializer
+from .serializers import (
+    BusinessSerializer,
+    CurrentUserSerializer,
+    ResendVerificationCodeSerializer,
+    SignupSerializer,
+    TeamUserSerializer,
+    VerifyEmailCodeSerializer,
+)
 
 
 class CurrentUserView(APIView):
@@ -21,14 +35,55 @@ class CurrentUserView(APIView):
 
 
 class SignupView(APIView):
-    """Create a new tenant and its first owner account."""
+    """Send verification for a registration before creating its tenant or owner."""
 
     permission_classes = (AllowAny,)
 
     def post(self, request):
         serializer = SignupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        try:
+            with transaction.atomic():
+                registration = serializer.save()
+                send_email_verification(registration)
+        except EmailVerificationDeliveryError:
+            return Response(
+                {'detail': 'We could not send the verification code. Please try again in a moment.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(
+            {
+                'detail': 'Verification code sent. Enter the six-digit code before signing in.',
+                'email': registration.email,
+                'verification_required': True,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class VerifyEmailCodeView(APIView):
+    """Complete a pending signup after the owner enters the emailed six-digit code."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        serializer = VerifyEmailCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        registration = PendingRegistration.objects.filter(email__iexact=serializer.validated_data['email']).first()
+        if not registration:
+            return Response(
+                {'detail': 'That email address or verification code is not valid.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user = activate_pending_registration(registration, serializer.validated_data['code'])
+        except EmailVerificationError:
+            return Response(
+                {'detail': 'That email address or verification code is not valid, has expired, or has already been used.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         refresh = RefreshToken.for_user(user)
         return Response(
             {
@@ -38,6 +93,28 @@ class SignupView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class ResendVerificationCodeView(APIView):
+    """Send a fresh code for a pending API or web registration."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        serializer = ResendVerificationCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        registration = PendingRegistration.objects.filter(email__iexact=serializer.validated_data['email']).first()
+        if not registration:
+            return Response({'detail': 'If a pending registration uses that email, a code is on its way.'})
+
+        try:
+            send_email_verification(registration)
+        except EmailVerificationDeliveryError:
+            return Response(
+                {'detail': 'We could not send the verification code. Please try again in a moment.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({'detail': 'If a pending registration uses that email, a code is on its way.'})
 
 
 class CurrentBusinessView(APIView):

@@ -10,7 +10,7 @@ The application has two first-class interfaces:
 ## What is implemented
 
 - Multi-tenant businesses with owner, manager, and salesperson roles.
-- Signup, login/logout, onboarding, team management, business settings, and service management.
+- Email-confirmed business registration: no `Business` or owner `User` is created until the owner enters the expiring six-digit email code.
 - A seven-stage lead pipeline: New inquiry, Contacted, Site visit, Quotation sent, Negotiation, Won, and Lost.
 - Lead quick-add, search/filtering, assignment, editing, activity timeline, and validated lost reasons.
 - A Kanban board with desktop drag-and-drop, internally scrollable columns, and role-scoped visibility.
@@ -32,6 +32,8 @@ One running application serves independent businesses. Each `Business` is a tena
 | Area | Endpoint |
 | --- | --- |
 | Sign up | `POST /api/v1/auth/signup/` |
+| Verify signup code | `POST /api/v1/auth/verify-email/` |
+| Resend signup code | `POST /api/v1/auth/verify-email/resend/` |
 | JWT login | `POST /api/v1/auth/token/` |
 | Refresh JWT | `POST /api/v1/auth/token/refresh/` |
 | Current user | `GET /api/v1/me/` |
@@ -45,7 +47,7 @@ One running application serves independent businesses. Each `Business` is a tena
 | Follow-up tasks | `/api/v1/follow-up-tasks/` |
 | Notifications | `/api/v1/notifications/` |
 
-All API routes require JWT authentication except signup, token creation, and token refresh.
+All API routes require JWT authentication except signup, email-code verification, token creation, and token refresh. API signup creates only a temporary pending registration and returns a verification-required response; the business, owner account, and JWT access become available only after the owner enters the emailed six-digit code.
 
 ## Local setup
 
@@ -59,6 +61,22 @@ All API routes require JWT authentication except signup, token creation, and tok
    POSTGRES_HOST=127.0.0.1
    POSTGRES_PORT=5432
    ```
+
+   To deliver verification codes outside local development, add your SMTP provider settings. Use an app password or provider-issued SMTP credential—never a normal mailbox password—and keep this file out of version control:
+
+   ```text
+   EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+   DEFAULT_FROM_EMAIL=Cuein <no-reply@yourdomain.com>
+   EMAIL_HOST=smtp.your-provider.com
+   EMAIL_PORT=587
+   EMAIL_HOST_USER=your-smtp-user
+   EMAIL_HOST_PASSWORD=your-smtp-app-password
+   EMAIL_USE_TLS=true
+   EMAIL_USE_SSL=false
+   EMAIL_VERIFICATION_TIMEOUT=86400
+   ```
+
+   Codes expire after 24 hours by default; change `EMAIL_VERIFICATION_TIMEOUT` in seconds if needed. In local development, email uses Django’s console backend by default, so the verification code is printed in the server terminal.
 
 3. Install dependencies, migrate, and validate the project:
 

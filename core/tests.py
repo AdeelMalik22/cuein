@@ -1,8 +1,12 @@
+from django.contrib.auth.hashers import make_password
+from django.core import mail
+from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Business, User
+from .models import Business, PendingRegistration, User
 
 
 class CurrentUserApiTests(APITestCase):
@@ -48,21 +52,54 @@ class BusinessAndTeamApiTests(APITestCase):
             role=User.Role.OWNER,
         )
 
-    def test_signup_creates_a_business_and_owner(self):
+    @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+    def test_signup_holds_registration_until_email_is_verified(self):
         response = self.client.post(
             reverse('signup'),
             {
                 'business_name': 'Skyline AC',
                 'username': 'skyline-owner',
                 'password': 'Strong-test-password-123',
+                'email': 'owner@skyline.example',
             },
             format='json',
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data['user']['role'], User.Role.OWNER)
-        self.assertEqual(response.data['user']['business']['name'], 'Skyline AC')
+        self.assertTrue(response.data['verification_required'])
+        self.assertEqual(response.data['email'], 'owner@skyline.example')
+        self.assertNotIn('access', response.data)
+        registration = PendingRegistration.objects.get(username='skyline-owner')
+        self.assertEqual(registration.business_name, 'Skyline AC')
+        self.assertFalse(User.objects.filter(username='skyline-owner').exists())
+        self.assertFalse(Business.objects.filter(name='Skyline AC').exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('six-digit code', mail.outbox[0].body)
+        self.assertNotIn('/verify-email/', mail.outbox[0].body)
+
+    def test_verification_code_creates_the_owner_and_returns_tokens(self):
+        PendingRegistration.objects.create(
+            business_name='Verified AC',
+            username='verified-ac-owner',
+            email='verified@ac.example',
+            password=make_password('Strong-test-password-123'),
+            verification_code_hash=make_password('123456'),
+            verification_sent_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse('email_verify'),
+            {'email': 'verified@ac.example', 'code': '123456'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
+        owner = User.objects.get(username='verified-ac-owner')
+        self.assertTrue(owner.is_active)
+        self.assertEqual(owner.business.name, 'Verified AC')
+        self.assertFalse(PendingRegistration.objects.filter(email='verified@ac.example').exists())
 
     def test_owner_can_update_only_own_business(self):
         self.client.force_authenticate(self.owner)

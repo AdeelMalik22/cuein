@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<body style="background:#f5f5f3;color:#111111;font-family:Arial,sans-serif;margin:0;padding:32px 16px;">
+  <main style="background:#ffffff;border:1px solid #dfdfdc;border-radius:16px;margin:0 auto;max-width:560px;padding:36px;">
+    <p style="color:#70706c;font-size:12px;font-weight:700;letter-spacing:1.6px;margin:0 0 12px;text-transform:uppercase;">Cuein</p>
+    <h1 style="font-family:Georgia,serif;font-size:30px;letter-spacing:-1px;line-height:1.1;margin:0 0 16px;">Your verification code</h1>
+    <p style="color:#4f4f4b;font-size:16px;line-height:1.55;margin:0 0 20px;">Hi {{ registration.first_name|default:registration.username }}, enter this code in Cuein to create and activate <strong>{{ registration.business_name }}</strong>.</p>
+    <p style="background:#f5f5f3;border:1px solid #dfdfdc;border-radius:12px;color:#111111;font-family:Menlo,Consolas,monospace;font-size:28px;font-weight:700;letter-spacing:8px;margin:0 0 28px;padding:18px 20px;text-align:center;">{{ verification_code }}</p>
+    <p style="border-top:1px solid #dfdfdc;color:#70706c;font-size:13px;line-height:1.5;margin:0;padding-top:20px;">This code expires in {{ verification_timeout_hours }} hour{{ verification_timeout_hours|pluralize }}. Never share it with anyone. If you did not create this workspace, you can safely ignore this email.</p>
+  </main>
+</body>
+</html>

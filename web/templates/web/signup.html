@@ -18,18 +18,18 @@
       <ul class="auth-points"><li>One shared sales pipeline</li><li>Follow-ups that stay visible</li><li>No setup maze</li></ul>
     </section>
     <section class="auth-card signup-card">
-      <div class="auth-card-heading"><p class="eyebrow">CREATE YOUR WORKSPACE</p><h2>Register your business</h2><p>It takes less than a minute.</p></div>
+      <div class="auth-card-heading"><p class="eyebrow">CREATE YOUR WORKSPACE</p><h2>Register your business</h2><p>It takes less than a minute. Your workspace is created only after you confirm the six-digit verification code.</p></div>
       <form method="post" class="auth-form">
         {% csrf_token %}
-        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
         {% for field in form %}
           <label class="field {% if field.name == 'business_name' or field.name == 'owner_name' or field.name == 'email' or field.name == 'password' %}field-wide{% endif %}">
             <span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}
           </label>
         {% endfor %}
+        {% if form.non_field_errors %}<div class="form-errors form-submit-error field-wide" role="alert">{% for error in form.non_field_errors %}{{ error }}{% endfor %}</div>{% endif %}
         <button class="button button-accent field-wide" type="submit">Create workspace <span aria-hidden="true">→</span></button>
       </form>
-      <p class="auth-switch">Already use Cuein? <a href="{% url 'web:login' %}">Sign in</a></p>
+      <p class="auth-switch">Already use Cuein? <a href="{% url 'web:login' %}">Sign in</a> · Need a new verification code? <a href="{% url 'web:email-verification-sent' %}">Send one</a></p>
     </section>
   </main>
 </body>

@@ -1,8 +1,8 @@
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
-from django.db import transaction
 from rest_framework import serializers
 
-from .models import Business, User
+from .models import Business, PendingRegistration, User
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -68,11 +68,11 @@ class SignupSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    email = serializers.EmailField(required=False, allow_blank=True)
+    email = serializers.EmailField()
     phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
 
     def validate_username(self, value):
-        if User.objects.filter(username=value).exists():
+        if User.objects.filter(username=value).exists() or PendingRegistration.objects.filter(username=value).exists():
             raise serializers.ValidationError('This username is already in use.')
         return value
 
@@ -80,15 +80,33 @@ class SignupSerializer(serializers.Serializer):
         validate_password(value)
         return value
 
-    @transaction.atomic
+    def validate_email(self, value):
+        email = value.strip().lower()
+        if User.objects.filter(email__iexact=email).exists() or PendingRegistration.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError('An account already uses this email.')
+        return email
+
     def create(self, validated_data):
-        business = Business.objects.create(
-            name=validated_data.pop('business_name'),
+        password = validated_data.pop('password')
+        return PendingRegistration.objects.create(
+            business_name=validated_data.pop('business_name'),
             industry=validated_data.pop('industry'),
             timezone=validated_data.pop('timezone'),
-        )
-        return User.objects.create_user(
-            business=business,
-            role=User.Role.OWNER,
+            password=make_password(password),
             **validated_data,
         )
+
+
+class VerifyEmailCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.RegexField(regex=r'^\d{6}$', max_length=6)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class ResendVerificationCodeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.strip().lower()

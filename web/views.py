@@ -3,6 +3,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -14,7 +15,13 @@ from django.utils import timezone
 from django.views import View
 from django.views.generic import FormView, ListView, TemplateView, UpdateView
 
-from core.models import User
+from core.email_verification import (
+    activate_pending_registration,
+    EmailVerificationDeliveryError,
+    EmailVerificationError,
+    send_email_verification,
+)
+from core.models import PendingRegistration, User
 from followups.models import FollowUpTask
 from followups.rules import DELAYED_FOLLOWUP, rule_for_stage
 from followups.tasks import schedule_follow_up
@@ -24,6 +31,8 @@ from leads.models import Activity, Lead, Product
 from .forms import (
     ActivityForm,
     BusinessForm,
+    EmailVerificationCodeForm,
+    EmailVerificationResendForm,
     LeadDetailsForm,
     LeadFollowUpForm,
     LeadQuickAddForm,
@@ -53,8 +62,80 @@ class SignupView(FormView):
     form_class = SignupForm
 
     def form_valid(self, form):
-        user = form.save()
-        login(self.request, user)
+        try:
+            with transaction.atomic():
+                registration = form.save()
+                send_email_verification(registration)
+        except EmailVerificationDeliveryError:
+            form.add_error(None, 'We could not send the verification code. Please try again in a moment.')
+            return self.form_invalid(form)
+
+        self.request.session['pending_email_verification_registration_id'] = str(registration.pk)
+        return redirect('web:email-verification-sent')
+
+
+class EmailVerificationSentView(TemplateView):
+    template_name = 'web/email_verification_sent.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        registration_id = self.request.session.get('pending_email_verification_registration_id')
+        registration = PendingRegistration.objects.filter(pk=registration_id).only('email').first()
+        context['pending_email'] = registration.email if registration else ''
+        context['verification_timeout_hours'] = max(1, settings.EMAIL_VERIFICATION_TIMEOUT // 3600)
+        context['verification_form'] = EmailVerificationCodeForm(initial={'email': context['pending_email']})
+        context['resend_form'] = EmailVerificationResendForm(initial={'email': context['pending_email']})
+        return context
+
+
+class EmailVerificationResendView(View):
+    def post(self, request):
+        form = EmailVerificationResendForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, 'Enter a valid email address to request a new verification code.')
+            return redirect('web:email-verification-sent')
+
+        registration = PendingRegistration.objects.filter(
+            email__iexact=form.cleaned_data['email'],
+        ).first()
+        if not registration:
+            messages.success(request, 'If a pending registration uses that email, a verification code is on its way.')
+            return redirect('web:email-verification-sent')
+
+        try:
+            send_email_verification(registration)
+        except EmailVerificationDeliveryError:
+            messages.error(request, 'We could not resend the verification code. Please try again in a moment.')
+        else:
+            request.session['pending_email_verification_registration_id'] = str(registration.pk)
+            messages.success(request, 'A fresh six-digit verification code has been sent.')
+        return redirect('web:email-verification-sent')
+
+
+class EmailVerificationView(View):
+    def get(self, request):
+        return redirect('web:email-verification-sent')
+
+    def post(self, request):
+        form = EmailVerificationCodeForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, 'Enter the email address and six-digit verification code.')
+            return redirect('web:email-verification-sent')
+
+        registration = PendingRegistration.objects.filter(email__iexact=form.cleaned_data['email']).first()
+        if not registration:
+            messages.error(request, 'That email address or verification code is not valid.')
+            return redirect('web:email-verification-sent')
+
+        try:
+            user = activate_pending_registration(registration, form.cleaned_data['code'])
+        except EmailVerificationError:
+            messages.error(request, 'That email address or verification code is not valid, has expired, or has already been used.')
+            return redirect('web:email-verification-sent')
+
+        request.session.pop('pending_email_verification_registration_id', None)
+        login(request, user)
+        messages.success(request, 'Email verified. Your workspace is ready.')
         return redirect('web:onboarding')
 
 

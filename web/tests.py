@@ -1,10 +1,13 @@
 from datetime import timedelta
 
+from django.contrib.auth.hashers import make_password
+from django.core import mail
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Business, User
+from core.models import Business, PendingRegistration, User
 from followups.models import FollowUpTask
 from leads.models import Lead, Product
 
@@ -69,6 +72,90 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(response, 'See the shape of your pipeline.')
         self.assertContains(response, 'data-live-clock')
         self.assertContains(response, 'data-sidebar-toggle')
+
+
+class EmailVerificationTests(TestCase):
+    def setUp(self):
+        self.registration = PendingRegistration.objects.create(
+            business_name='North Star Solar',
+            industry=Business.Industry.SOLAR,
+            timezone='Asia/Karachi',
+            username='owner',
+            email='owner@northstar.example',
+            password=make_password('test-password'),
+            verification_code_hash=make_password('123456'),
+            verification_sent_at=timezone.now(),
+        )
+
+    @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+    def test_web_signup_sends_a_verification_email_and_waits_for_confirmation(self):
+        response = self.client.post(
+            reverse('web:signup'),
+            {
+                'business_name': 'Skyline AC',
+                'industry': Business.Industry.AC_INSTALLATION,
+                'owner_name': 'Skyline Owner',
+                'email': 'owner@skyline.example',
+                'password': 'Strong-test-password-123',
+            },
+        )
+
+        registration = PendingRegistration.objects.get(email='owner@skyline.example')
+        self.assertRedirects(response, reverse('web:email-verification-sent'))
+        self.assertEqual(registration.business_name, 'Skyline AC')
+        self.assertFalse(User.objects.filter(email='owner@skyline.example').exists())
+        self.assertFalse(Business.objects.filter(name='Skyline AC').exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('six-digit code', mail.outbox[0].body)
+        self.assertRegex(mail.outbox[0].body, r'\b\d{6}\b')
+        self.assertNotIn('/verify-email/', mail.outbox[0].body)
+
+    def test_verification_code_activates_the_owner_and_starts_their_session(self):
+        response = self.client.post(
+            reverse('web:email-verify'),
+            {'email': 'owner@northstar.example', 'code': '123456'},
+        )
+
+        owner = User.objects.get(email='owner@northstar.example')
+        self.assertRedirects(response, reverse('web:onboarding'))
+        self.assertTrue(owner.is_active)
+        self.assertIsNotNone(owner.email_verified_at)
+        self.assertEqual(owner.business.name, 'North Star Solar')
+        self.assertFalse(PendingRegistration.objects.filter(pk=self.registration.pk).exists())
+        self.assertEqual(self.client.session.get('_auth_user_id'), str(owner.pk))
+
+    def test_used_code_cannot_create_a_second_workspace(self):
+        first_response = self.client.post(
+            reverse('web:email-verify'),
+            {'email': 'owner@northstar.example', 'code': '123456'},
+        )
+        self.client.logout()
+
+        response = self.client.post(
+            reverse('web:email-verify'),
+            {'email': 'owner@northstar.example', 'code': '123456'},
+        )
+
+        self.assertRedirects(first_response, reverse('web:onboarding'))
+        self.assertRedirects(response, reverse('web:email-verification-sent'))
+        self.assertEqual(Business.objects.filter(name='North Star Solar').count(), 1)
+
+    def test_five_incorrect_codes_lock_the_registration_until_resend(self):
+        for _ in range(5):
+            self.client.post(
+                reverse('web:email-verify'),
+                {'email': 'owner@northstar.example', 'code': '000000'},
+            )
+
+        self.registration.refresh_from_db()
+        correct_code_response = self.client.post(
+            reverse('web:email-verify'),
+            {'email': 'owner@northstar.example', 'code': '123456'},
+        )
+
+        self.assertEqual(self.registration.verification_attempts, 5)
+        self.assertRedirects(correct_code_response, reverse('web:email-verification-sent'))
+        self.assertFalse(User.objects.filter(email='owner@northstar.example').exists())
 
 
 class LeadBoardPaginationTests(TestCase):
