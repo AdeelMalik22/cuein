@@ -1,0 +1,145 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111111">
+  <title>Cuein · Nothing gets forgotten</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'web/app.css' %}">
+</head>
+<body class="marketing-body">
+  <header class="marketing-nav">
+    <a class="wordmark" href="{% url 'web:landing' %}"><span>c</span>uein</a>
+    <nav aria-label="Marketing navigation">
+      <a href="#workflow">How it works</a>
+      <a href="#built-for">Built for your work</a>
+      <a href="{% url 'web:login' %}">Sign in</a>
+      <a class="button button-dark" href="{% url 'web:signup' %}">Start free</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="marketing-hero">
+      <div class="hero-copy">
+        <p class="eyebrow">THE FOLLOW-UP SYSTEM FOR SMALL SALES TEAMS</p>
+        <h1>“Thanks, I’ll think about it.”<br><em>Then what?</em></h1>
+        <p class="hero-intro">Cuein gives every inquiry an owner, a next action, and a place in the pipeline — so a good sale never disappears into WhatsApp, a spreadsheet, or someone’s memory.</p>
+        <div class="hero-actions">
+          <a class="button button-accent" href="{% url 'web:signup' %}">Register your business <span aria-hidden="true">→</span></a>
+          <a class="quiet-link" href="#workflow">See the workflow <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="hero-footnote">For solar, CCTV, real estate, construction, furniture, and teams that sell in the real world.</p>
+      </div>
+
+      <div class="hero-ledger" aria-label="Example of Cuein's daily attention view">
+        <div class="ledger-topline"><span>Monday, 9:14 AM</span><span class="ledger-live">Live follow-up view</span></div>
+        <div class="ledger-heading">
+          <p>Nothing gets forgotten.</p>
+          <strong>3 things need a nudge</strong>
+        </div>
+        <div class="ledger-list">
+          <article class="ledger-item is-overdue">
+            <span class="ledger-signal" aria-hidden="true"></span>
+            <div><strong>Ali Khan</strong><small>Solar installation · quotation sent</small></div>
+            <time>2d overdue</time>
+          </article>
+          <article class="ledger-item">
+            <span class="ledger-signal" aria-hidden="true"></span>
+            <div><strong>Saima Homes</strong><small>Site visit · assigned to Hassan</small></div>
+            <time>Today</time>
+          </article>
+          <article class="ledger-item">
+            <span class="ledger-signal" aria-hidden="true"></span>
+            <div><strong>Usman Ali</strong><small>Customer asked for time</small></div>
+            <time>Wed</time>
+          </article>
+        </div>
+        <div class="ledger-bottom"><span>Every open lead has a next step.</span><span aria-hidden="true">↗</span></div>
+      </div>
+    </section>
+
+    <section id="workflow" class="pipeline-section">
+      <div class="section-intro">
+        <p class="eyebrow">ONE SHARED PIPELINE</p>
+        <h2>From first message to a clear outcome.</h2>
+        <p>No custom maze of fields. Just the seven moments a service sale actually moves through.</p>
+      </div>
+      <ol class="marketing-pipeline">
+        <li><span>01</span><strong>New inquiry</strong></li>
+        <li><span>02</span><strong>Contacted</strong></li>
+        <li><span>03</span><strong>Site visit</strong></li>
+        <li><span>04</span><strong>Quote sent</strong></li>
+        <li><span>05</span><strong>Negotiation</strong></li>
+        <li><span>06</span><strong>Won</strong></li>
+        <li><span>07</span><strong>Lost</strong></li>
+      </ol>
+    </section>
+
+    <section class="automation-section">
+      <div class="automation-copy">
+        <p class="eyebrow">FOLLOW-UPS THAT APPEAR ON TIME</p>
+        <h2>The reminder is part of the work, not another thing to remember.</h2>
+        <p>When your team sends a quote or a customer asks for time, Cuein puts the next follow-up back in front of the right person. The owner can see what is quiet before it becomes lost.</p>
+      </div>
+      <div class="automation-demo" aria-label="Example automatic reminder">
+        <div class="automation-event"><span class="event-number">1</span><div><small>Today · 2:05 PM</small><strong>Quote sent to Adeel</strong><p>Rooftop solar · Rs 485,000</p></div></div>
+        <div class="automation-line" aria-hidden="true"></div>
+        <div class="automation-event automation-result"><span class="event-number">2</span><div><small>Automatically added</small><strong>Follow up in 2 days</strong><p>Assigned to Sana · Thursday, 2:05 PM</p></div></div>
+      </div>
+    </section>
+
+    <section class="comparison-section">
+      <div class="section-intro">
+        <p class="eyebrow">SIMPLER BY DESIGN</p>
+        <h2>A sales system your team will actually keep open.</h2>
+      </div>
+      <div class="comparison-grid">
+        <article>
+          <p class="comparison-label">Heavyweight CRMs</p>
+          <ul>
+            <li>Built for long procurement cycles</li>
+            <li>Configuration before your first lead</li>
+            <li>More dashboards than next actions</li>
+          </ul>
+          <small>Useful when you need Salesforce or HubSpot-scale operations.</small>
+        </article>
+        <article class="comparison-cuein">
+          <p class="comparison-label">Cuein</p>
+          <ul>
+            <li>Capture a call in seconds</li>
+            <li>One pipeline everyone understands</li>
+            <li>Today’s work is impossible to miss</li>
+          </ul>
+          <small>Made for a small team selling services, right now.</small>
+        </article>
+      </div>
+    </section>
+
+    <section id="built-for" class="industries-section">
+      <div class="section-intro">
+        <p class="eyebrow">BUILT AROUND REAL SALES WORK</p>
+        <h2>One calm system, whatever you install, build, or sell.</h2>
+      </div>
+      <div class="industry-grid">
+        <article><span>Solar</span><p>Quotes that need a thoughtful second call.</p></article>
+        <article><span>CCTV & security</span><p>Site visits, proposals, and fast-moving inquiries.</p></article>
+        <article><span>Real estate</span><p>Viewings and buyers who need the right timing.</p></article>
+        <article><span>Construction</span><p>Projects with several conversations before a yes.</p></article>
+        <article><span>Furniture</span><p>Custom orders that should not get lost after the quote.</p></article>
+      </div>
+    </section>
+
+    <section class="marketing-cta">
+      <p class="eyebrow">START WITH THE NEXT LEAD</p>
+      <h2>Make sure the next “I’ll think about it” gets a follow-up.</h2>
+      <a class="button button-accent" href="{% url 'web:signup' %}">Create your workspace <span aria-hidden="true">→</span></a>
+    </section>
+  </main>
+
+  <footer class="marketing-footer"><a class="wordmark" href="{% url 'web:landing' %}"><span>c</span>uein</a><span>Every lead deserves a next step.</span><a href="{% url 'web:login' %}">Sign in</a></footer>
+</body>
+</html>

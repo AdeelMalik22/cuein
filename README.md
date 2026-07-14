@@ -33,6 +33,9 @@ One running application serves many independent businesses. Each business is a t
 | Leads | `/api/v1/leads/` |
 | Assign lead | `POST /api/v1/leads/{id}/assign/` |
 | Change stage | `POST /api/v1/leads/{id}/transition/` |
+| Request follow-up time | `POST /api/v1/leads/{id}/needs-time/` |
+| Follow-up tasks | `/api/v1/follow-up-tasks/` |
+| Notifications | `/api/v1/notifications/` |
 
 All API routes require JWT authentication except signup, login, and token refresh.
 
@@ -52,6 +55,7 @@ All API routes require JWT authentication except signup, login, and token refres
 3. Apply migrations and run checks:
 
    ```bash
+   venv/bin/pip install -r requirements.txt
    venv/bin/python manage.py migrate
    venv/bin/python manage.py check
    venv/bin/python manage.py test
@@ -62,6 +66,16 @@ All API routes require JWT authentication except signup, login, and token refres
    ```bash
    venv/bin/python manage.py runserver
    ```
+
+5. To run automated follow-ups, start Redis, then run a Celery worker and scheduler in separate terminals:
+
+   ```bash
+   venv/bin/celery -A cuein worker --loglevel=INFO
+   venv/bin/celery -A cuein beat --loglevel=INFO
+   ```
+
+   Celery uses `redis://127.0.0.1:6379/0` by default. Override `CELERY_BROKER_URL` and
+   `CELERY_RESULT_BACKEND` in `.env` when Redis runs elsewhere.
 
 The API will be available at `http://127.0.0.1:8000/api/v1/`.
 

@@ -1,0 +1,14 @@
+{% extends 'web/base.html' %}
+{% block title %}Quick add lead · Cuein{% endblock %}
+{% block content %}
+  <section class="quick-add-layout">
+    <div class="quick-add-copy"><a class="back-link" href="{% url 'web:lead-list' %}"><span aria-hidden="true">←</span> Back to pipeline</a><p class="eyebrow">FAST LEAD CAPTURE</p><h1>Add the inquiry before it goes cold.</h1><p>Only the essentials now: name, phone, and where the lead came from. Add a quotation or more detail after the call.</p></div>
+    <section class="quick-add-card">
+      <form method="post" class="quick-add-form">{% csrf_token %}
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        {% for field in form %}<label class="field {% if field.name == 'customer_name' or field.name == 'phone' or field.name == 'source' %}field-large{% endif %}"><span>{{ field.label }}{% if field.field.required %}<b aria-hidden="true">*</b>{% endif %}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}{% if field.name == 'assigned_user' %}<small class="field-hint">Leave blank to keep this lead with you.</small>{% endif %}</label>{% endfor %}
+        <button class="button button-accent" type="submit">Add lead <span aria-hidden="true">→</span></button>
+      </form>
+    </section>
+  </section>
+{% endblock %}

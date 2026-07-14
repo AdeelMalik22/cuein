@@ -1,0 +1,60 @@
+{% extends 'web/base.html' %}
+{% block title %}{{ lead.customer_name }} · Cuein{% endblock %}
+{% block content %}
+  <a class="back-link detail-back-link" href="{% url 'web:lead-list' %}"><span aria-hidden="true">←</span> Back to pipeline</a>
+  <section class="lead-detail-heading">
+    <div><p class="eyebrow">{{ lead.get_stage_display }}</p><h1>{{ lead.customer_name }}</h1><p>{{ lead.phone }}{% if lead.email %} · {{ lead.email }}{% endif %}</p></div>
+    <div class="lead-heading-meta"><span class="stage-pill stage-pill-large">{{ lead.get_stage_display }}</span><small>Last activity {{ lead.last_activity_at|timesince }} ago</small></div>
+  </section>
+
+  <section id="move-lead" class="lead-command-card">
+    <div><p class="eyebrow">MOVE THE LEAD</p><h2>What changed?</h2><p>Update the stage when the conversation moves. Cuein will handle the right follow-up reminder.</p></div>
+    <form class="stage-change-form" method="post" action="{% url 'web:lead-stage' lead.pk %}">{% csrf_token %}
+      <label class="field"><span>Current stage</span>{{ stage_form.stage }}</label>
+      <label class="field lost-reason-field"><span>Reason if lost</span>{{ stage_form.lost_reason }}</label>
+      <label class="field stage-note-field"><span>Optional note</span>{{ stage_form.note }}</label>
+      <button class="button button-accent" type="submit">Move lead <span aria-hidden="true">→</span></button>
+    </form>
+    {% if lead.stage != 'won' and lead.stage != 'lost' %}<form method="post" action="{% url 'web:lead-needs-time' lead.pk %}" class="needs-time-form">{% csrf_token %}<button class="button button-muted" type="submit">Customer needs time</button></form>{% endif %}
+  </section>
+
+  <section class="lead-detail-grid">
+    <div class="lead-detail-main">
+      <article class="panel activity-composer">
+        <div class="panel-heading"><div><p class="eyebrow">LOG THE CONVERSATION</p><h2>What happened?</h2></div></div>
+        <form method="post" action="{% url 'web:lead-activity-create' lead.pk %}" class="activity-form">{% csrf_token %}
+          <label class="field activity-kind"><span>Type</span>{{ activity_form.kind }}</label>
+          <label class="field activity-note"><span class="sr-only">Activity note</span>{{ activity_form.content }}</label>
+          <button class="button button-dark" type="submit">Add to timeline</button>
+        </form>
+      </article>
+
+      <article class="panel timeline-panel">
+        <div class="panel-heading"><div><p class="eyebrow">HISTORY</p><h2>Timeline</h2></div><span class="muted-label">Newest first</span></div>
+        <div class="timeline">
+          {% for activity in timeline %}
+            <article class="timeline-item"><span class="timeline-dot {% if activity.kind == 'stage_change' %}stage-change{% endif %}" aria-hidden="true"></span><div><div class="timeline-item-top"><strong>{{ activity.get_kind_display }}</strong><time>{{ activity.created_at|date:'M j · g:i A' }}</time></div><p>{{ activity.content }}</p><small>{{ activity.created_by.get_full_name|default:activity.created_by.username }}</small></div></article>
+          {% empty %}<div class="empty-state">The history starts when you add the first note.</div>{% endfor %}
+        </div>
+      </article>
+    </div>
+
+    <aside class="lead-detail-sidebar">
+      <article class="panel lead-summary-panel">
+        <div class="panel-heading"><div><p class="eyebrow">LEAD DETAILS</p><h2>Customer & quote</h2></div></div>
+        <form method="post" action="{% url 'web:lead-update' lead.pk %}" class="details-form">{% csrf_token %}
+          {% for field in details_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}
+          <button class="button button-muted" type="submit">Save details</button>
+        </form>
+      </article>
+
+      <article class="panel lead-tasks-panel">
+        <div class="panel-heading"><div><p class="eyebrow">NEXT ACTIONS</p><h2>Follow-ups</h2></div><span class="task-count">{{ open_tasks|length }}</span></div>
+        <div class="lead-task-list">
+          {% for task in open_tasks %}<a href="{% url 'web:task-list' %}" class="lead-task {% if task.status == 'overdue' %}is-overdue{% endif %}"><span class="status-dot {% if task.status == 'overdue' %}is-overdue{% endif %}"></span><span><strong>{{ task.description }}</strong><small>{% if task.status == 'overdue' %}Overdue · {% endif %}{{ task.due_at|date:'D, M j · g:i A' }}</small></span></a>{% empty %}<div class="empty-state compact-empty"><p>No open follow-up yet.</p></div>{% endfor %}
+        </div>
+        <details class="schedule-follow-up"><summary>Schedule a follow-up <span aria-hidden="true">+</span></summary><form method="post" action="{% url 'web:lead-follow-up-create' lead.pk %}" class="inline-form">{% csrf_token %}{% for field in follow_up_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}</label>{% endfor %}<button class="button button-dark" type="submit">Schedule it</button></form></details>
+      </article>
+    </aside>
+  </section>
+{% endblock %}

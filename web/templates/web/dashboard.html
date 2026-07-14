@@ -1,0 +1,165 @@
+{% extends 'web/base.html' %}
+{% block title %}Overview · Cuein{% endblock %}
+{% block content %}
+    <section class="page-heading dashboard-heading">
+        <div><p class="eyebrow">{{ today|date:'l, F j' }}</p>
+            <h1>Good morning, {{ request.user.first_name|default:request.user.username }}.</h1>
+            <p>One calm view of every follow-up that needs attention.</p></div>
+        <a class="button button-dark" href="{% url 'web:lead-create' %}">Add a lead <span
+                aria-hidden="true">+</span></a>
+    </section>
+
+    <section class="attention-board {% if attention_count %}has-attention{% endif %}"
+             aria-labelledby="attention-heading">
+        <div class="attention-intro"><p class="eyebrow">DAILY ATTENTION VIEW</p>
+            <h2 id="attention-heading">Nothing gets forgotten.</h2>
+            <p>{% if attention_count %}{{ attention_count }} item{{ attention_count|pluralize }} need
+                {{ attention_count|pluralize:'s,' }} a nudge before they quietly become lost.{% else %}Everything open
+                has a visible next step. Keep the rhythm going.{% endif %}</p></div>
+        <div class="attention-count"><strong>{{ attention_count }}</strong><span>needs attention</span></div>
+        <div class="attention-breakdown">
+            <a href="{% url 'web:task-list' %}?status=overdue"><strong>{{ overdue_count }}</strong><span>overdue follow-ups</span></a>
+            <a href="{% url 'web:lead-list' %}"><strong>{{ stalled_leads|length }}</strong><span>stalled leads</span></a>
+            <a href="{% url 'web:lead-list' %}?stage=quotation_sent"><strong>{{ quiet_quotes|length }}</strong><span>quiet quotations</span></a>
+        </div>
+    </section>
+
+    <section class="metric-grid overview-metrics">
+        <article class="metric-card"><span>Due today</span><strong>{{ due_today_count }}</strong><a
+                href="{% url 'web:task-list' %}">Open follow-ups <span aria-hidden="true">→</span></a></article>
+        <article class="metric-card metric-alert"><span>Overdue</span><strong>{{ overdue_count }}</strong><a
+                href="{% url 'web:task-list' %}?status=overdue">Resolve now <span aria-hidden="true">→</span></a>
+        </article>
+        <article class="metric-card"><span>Open leads</span><strong>{{ active_leads_count }}</strong><a
+                href="{% url 'web:lead-list' %}">View pipeline <span aria-hidden="true">→</span></a></article>
+        <article class="metric-card"><span>Pipeline value</span><strong
+                class="metric-currency">Rs {{ pipeline_value|floatformat:0 }}</strong><a
+                href="{% url 'web:lead-list' %}">Review opportunities <span aria-hidden="true">→</span></a></article>
+    </section>
+
+    <section class="overview-grid">
+        <article class="panel priority-panel">
+            <div class="panel-heading">
+                <div><p class="eyebrow">NEXT UP</p>
+                    <h2>Follow-up queue</h2></div>
+                <a class="quiet-link" href="{% url 'web:task-list' %}">See all <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="task-list compact-list">
+                {% for task in tasks %}
+                    <a class="task-row" href="{% url 'web:lead-detail' task.lead.pk %}">
+                        <span class="status-dot {% if task.status == 'overdue' %}is-overdue{% endif %}"
+                              aria-hidden="true"></span>
+                        <span><strong>{{ task.lead.customer_name }}</strong><small>{{ task.description }}</small></span>
+                        <time class="{% if task.status == 'overdue' %}is-overdue{% endif %}">
+                            {% if task.status == 'overdue' %}Overdue
+                                · {% endif %}{{ task.due_at|date:'D, M j · g:i A' }}</time>
+                    </a>
+                {% empty %}
+                    <div class="empty-state compact-empty"><strong>Your queue is clear.</strong>
+                        <p>New follow-ups will appear here when your team creates them.</p></div>
+                {% endfor %}
+            </div>
+        </article>
+
+        <article class="panel pipeline-panel">
+            <div class="panel-heading">
+                <div><p class="eyebrow">PIPELINE</p>
+                    <h2>Where work is sitting</h2></div>
+                <a class="quiet-link" href="{% url 'web:lead-list' %}">Open board <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="stage-summary">
+                {% for stage in stage_rows %}
+                    <div class="stage-summary-row"><span>{{ stage.label }}</span>
+                        <div class="neutral-bar"><i style="width: {{ stage.width }}%"></i></div>
+                        <strong>{{ stage.total }}</strong></div>
+                {% endfor %}
+            </div>
+            <p class="panel-footnote">{{ needs_action_count }} active lead{{ needs_action_count|pluralize }} without an
+                open next action.</p>
+        </article>
+
+        <article class="panel team-panel">
+            <div class="panel-heading">
+                <div><p class="eyebrow">TEAM PULSE</p>
+                    <h2>Who may need a hand</h2></div>{% if is_owner %}
+                <a class="quiet-link" href="{% url 'web:team-list' %}">Manage team <span
+                        aria-hidden="true">→</span></a>{% endif %}</div>
+            <div class="team-pulse-list">
+                {% for row in team_attention %}
+                    <div class="team-pulse-row {% if row.needs_attention %}needs-attention{% endif %}">
+                        <span class="avatar avatar-small">{{ row.member.username|first|upper }}</span>
+                        <span><strong>{{ row.member.get_full_name|default:row.member.username }}</strong><small>{{ row.active_count }} open lead{{ row.active_count|pluralize }}</small></span>
+                        <span class="team-pulse-meta">{% if row.stalled_count %}
+                            <b>{{ row.stalled_count }} stalled</b>{% elif row.due_count %}
+                            <b>{{ row.due_count }} due</b>{% else %}On track{% endif %}</span>
+                    </div>
+                {% empty %}
+                    <div class="empty-state">Add your team to see activity here.</div>{% endfor %}
+                {% if team_attention_overflow %}
+                    <a class="quiet-link panel-footnote" href="{% url 'web:team-list' %}">+{{ team_attention_overflow }}
+                        more team member{{ team_attention_overflow|pluralize }} <span aria-hidden="true">→</span></a>
+                {% endif %}
+            </div>
+        </article>
+
+        <article class="panel watch-panel">
+            <div class="panel-heading">
+                <div><p class="eyebrow">KEEP AN EYE ON</p>
+                    <h2>Leads going quiet</h2></div>
+                <a class="quiet-link" href="{% url 'web:lead-list' %}">All leads <span aria-hidden="true">→</span></a>
+            </div>
+            {% if overdue_tasks or stalled_leads or quiet_quotes %}
+                <div class="watch-list">
+                    {% for task in overdue_tasks %}<a class="watch-row alert-row"
+                                                      href="{% url 'web:lead-detail' task.lead.pk %}"><span>Overdue</span><strong>{{ task.lead.customer_name }}</strong><small>{{ task.description }}</small></a>{% endfor %}
+                    {% for lead in quiet_quotes %}<a class="watch-row alert-row"
+                                                     href="{% url 'web:lead-detail' lead.pk %}"><span>Quote quiet</span><strong>{{ lead.customer_name }}</strong><small>{{ lead.last_activity_at|timesince }}
+                        ago</small></a>{% endfor %}
+                    {% for lead in stalled_leads %}<a class="watch-row"
+                                                      href="{% url 'web:lead-detail' lead.pk %}"><span>Stalled</span><strong>{{ lead.customer_name }}</strong><small>No
+                        activity for {{ lead.last_activity_at|timesince }}</small></a>{% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state compact-empty"><strong>No quiet leads right now.</strong>
+                    <p>When a quotation or conversation stalls, it will show up here.</p></div>
+            {% endif %}
+        </article>
+
+        <article class="panel recent-panel">
+            <div class="panel-heading">
+                <div><p class="eyebrow">RECENTLY TOUCHED</p>
+                    <h2>Latest movement across the pipeline</h2></div>
+                <a class="quiet-link" href="{% url 'web:lead-list' %}">See all <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Customer</th>
+                        <th>Stage</th>
+                        <th>Owner</th>
+                        <th>Last activity</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for lead in recent_leads %}
+                        <tr>
+                            <td><a class="table-lead-link"
+                                   href="{% url 'web:lead-detail' lead.pk %}"><strong>{{ lead.customer_name }}</strong><small>{{ lead.product|default:'No service selected' }}</small></a>
+                            </td>
+                            <td><span class="stage-pill">{{ lead.get_stage_display }}</span></td>
+                            <td>{{ lead.assigned_user.get_full_name|default:lead.assigned_user.username }}</td>
+                            <td>{{ lead.last_activity_at|timesince }} ago</td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">No leads yet. Add the first inquiry when it comes in.</div>
+                            </td>
+                        </tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    </section>
+{% endblock %}
