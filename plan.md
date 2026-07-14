@@ -1,8 +1,8 @@
 # Implementation Plan — Cuein Follow-Up Lead Management
 
 **Companion to:** `PRD-FollowUpCRM.md`  
-**Status:** Revised draft v1.1  
-**Last updated:** July 13, 2026
+**Status:** Active implementation — core MVP workflows are built; hardening and pilot readiness remain.
+**Last updated:** July 14, 2026
 
 ## 1. Delivery Goal and MVP Boundary
 
@@ -10,7 +10,7 @@ Build a mobile-responsive web app for small service businesses that makes the ne
 
 The first releasable MVP includes:
 
-- Tenant signup/bootstrap, JWT login, and team invitation.
+- Tenant signup/bootstrap, JWT login, and team management.
 - Fixed seven-stage pipeline; lead capture, assignment, and safe stage changes.
 - An append-only lead timeline and a manually created or automated next-action task.
 - A salesperson work queue and an owner/manager dashboard.
@@ -35,8 +35,8 @@ Explicitly defer configurable stages, configurable automation rules, WhatsApp/SM
 | Backend | Django + Django REST Framework | Admin, auth, ORM and validation suit a CRUD-heavy SaaS. |
 | Database | PostgreSQL in every environment except isolated unit tests | Required for production-like constraints, indexes, and aggregates. |
 | Async | Celery + Redis + Celery Beat | Separates immediate event scheduling from time-based sweeps. |
-| Frontend | React + Vite + TypeScript + Tailwind | Fast, typed, mobile-responsive UI. |
-| API auth | `djangorestframework-simplejwt` | Stateless browser API authentication. Prefer access token in memory and refresh token in an HttpOnly cookie if frontend/backend share a parent domain. |
+| Frontend | Django templates + shared CSS + progressive JavaScript | Keeps the workflow fast to build, mobile-responsive, and close to Django’s auth/forms. |
+| API auth | Django sessions for the web workspace; `djangorestframework-simplejwt` for the API | The workspace uses normal Django authentication while integrations use JWT. |
 | Tenant model | Shared schema, `business_id` on every tenant-owned table | Appropriate operational complexity for SMB SaaS. |
 | User model | Custom Django `User`, created before the first migration | Avoids the high-cost migration of changing `AUTH_USER_MODEL` later. A user belongs to one business in v1. |
 | Notifications | In-app task feed only | Keeps MVP focused; email/WhatsApp becomes an adapter, not a prerequisite. |
@@ -46,19 +46,22 @@ Use `followups` as the Django app name rather than `tasks`, which is easily conf
 ## 3. Architecture and Security Boundaries
 
 ```
-React SPA  →  DRF API  →  PostgreSQL
-                │
-                ├── Redis → Celery workers (event follow-ups)
-                └── Celery Beat → workers (daily/hourly sweeps)
+Browser  →  Django web views/templates
+                 │
+                 ├── PostgreSQL
+                 └── DRF API (JWT for integrations)
+                        │
+                        ├── Redis → Celery workers (event follow-ups)
+                        └── Celery Beat → workers (daily/hourly sweeps)
 ```
 
 ### Tenant scoping
 
 - `Business` is the tenant root. All tenant-owned models carry a non-null `business` FK.
 - The authenticated `request.user.business` is the only tenant source for HTTP requests. Never accept `business_id` from a client payload.
-- Each tenant-owned ViewSet inherits a single `TenantScopedViewSetMixin`. Its `get_queryset()` always filters by `request.user.business`; `perform_create()` assigns that business server-side.
+- Each tenant-owned ViewSet explicitly scopes `get_queryset()` with `request.user.business`; `perform_create()` assigns that business server-side. Keep this rule visible in every new ViewSet until a shared mixin provides the same clarity without hiding tenant ownership.
 - Object lookups must use that scoped queryset, producing 404 rather than exposing cross-tenant object existence.
-- Do **not** use a request/thread-local "current tenant" manager. It is fragile in admin, scripts, async work, and tests. Use explicit `.for_business(business)` querysets plus the ViewSet mixin.
+- Do **not** use a request/thread-local "current tenant" manager. It is fragile in admin, scripts, async work, and tests. Use explicit `.for_business(business)` querysets and consistently scoped ViewSet methods.
 - Serializers validate that every related object (product, assignee, lead) belongs to the authenticated user's business.
 - Celery tasks accept primitive IDs, then fetch with both primary key and `business_id`. Periodic tasks iterate businesses explicitly.
 - The Django admin must scope tenant-owned querysets and foreign-key choices to the admin user's business, or be restricted to a superuser-only internal console.
@@ -156,44 +159,46 @@ Deliver screens in workflow order:
 
 Use optimistic UI only for reversible actions; refetch/rollback on failure. Never assume a role from client state—the API response is authoritative. Include loading, empty, error, and no-permission states for each primary screen.
 
-## 8. Build Order, Exit Criteria, and Estimated Sequence
+## 8. Build Order, Status, and Next Steps
 
-### Phase 0 — Project foundation
+### Phase 0 — Project foundation — substantially complete
 
-- Configure environment variables, PostgreSQL, Redis, CORS/CSRF, JWT, custom user model, and Docker Compose for local services.
-- Add health/readiness endpoints, structured application logging, `.env.example`, and a CI workflow running format, lint, migrations check, and tests.
-- Create `Business`, `User`, tenant ViewSet mixin, role permissions, and tenant isolation test fixtures.
+- Implemented: PostgreSQL configuration, custom `User`, `Business`, JWT API auth, session-authenticated web views, role permissions, and tenant isolation test fixtures.
+- Remaining: Docker Compose, health/readiness endpoints, `.env.example`, structured logging, and CI for formatting, migration checks, and tests.
 
-**Exit:** a user can authenticate; every tenant-scoped list/detail request is demonstrably isolated; `makemigrations --check` and CI pass.
+**Exit:** a user can authenticate; every tenant-scoped list/detail request is demonstrably isolated; CI, readiness checks, and deployment configuration are in place.
 
-### Phase 1 — Lead workflow walking skeleton
+### Phase 1 — Lead workflow walking skeleton — complete
 
-- Build Product, Lead, Activity and transition service/API.
-- Implement manual activities, lead assignment, timeline, quick-add, detail page, and mobile-safe pipeline board.
-- Add the “active lead without next action” indicator, initially backed by manually created tasks.
+- Product, Lead, Activity, assignment, and stage-transition APIs are implemented with tenant validation.
+- The web workspace includes quick-add, lead detail/editing, activity logging, follow-up creation, and a responsive Kanban board with desktop drag-and-drop.
+- Dashboard/task views surface active leads without open next actions.
 
 **Exit:** a salesperson can create and progress a lead end-to-end, see a complete timeline, and cannot access a colleague’s lead; manager can reassign it.
 
-### Phase 2 — Follow-up engine
+### Phase 2 — Follow-up engine — implemented; operational hardening remains
 
-- Add `FollowUpTask`, rule constants, idempotent scheduling service, Celery worker/Beat, overdue and stale sweeps, and in-app notification feed.
-- Make task completion/rescheduling preserve the next-action invariant.
+- `FollowUpTask`, `Notification`, rule constants, idempotent scheduling, Celery task wrappers, overdue marking, and stale-lead escalation are implemented.
+- The web task queue supports complete and reschedule workflows; APIs preserve a new next action on task completion.
+- Remaining: production worker/Beat deployment verification, frozen-time/timezone coverage, and a user-facing notification feed in the web workspace.
 
-**Exit:** all five rules work under normal and retried execution, and periodic sweep tests use frozen time.
+**Exit:** all automation rules are verified under normal/retried execution and periodic sweeps have frozen-time/timezone coverage.
 
-### Phase 3 — Management visibility
+### Phase 3 — Management visibility — complete
 
-- Implement dashboard queries and role-aware frontend views.
-- Add server-side filters, pagination, and indexes; capture query counts for key dashboard endpoints.
+- Role-aware dashboard, task queue, team pulse, quiet-lead watch list, pipeline value, and active-lead metrics are implemented.
+- Dashboard analytics include a stage-distribution chart and source-conversion/win-rate graph; reports cover source, salesperson, product, and lost-reason patterns.
+- Search/filtering, pagination, and model indexes are present. Query-count measurement for large tenants remains a hardening task.
 
 **Exit:** owner sees accurate current metrics and salesperson sees only their personal work queue.
 
-### Phase 4 — Reports and pilot hardening
+### Phase 4 — Reports and pilot hardening — in progress
 
-- Add aggregate reports, onboarding, seed/demo data, audit-friendly admin access, and error monitoring.
-- Run usability testing with 2–3 pilot businesses and adjust copy/default reminders—not schema—unless evidence requires it.
+- Implemented: onboarding, aggregate reports, admin configuration, and targeted demo data for `Smith LLC`.
+- The Smith LLC seed creates 2,000 idempotent demo leads plus activities and a mix of upcoming, overdue, completed, and cancelled follow-ups.
+- Remaining: audit-focused admin review, error monitoring, deployment runbook, and usability testing with pilot businesses.
 
-**Exit:** first business can create a tenant, invite a team member, and log its first lead in under 15 minutes without developer help.
+**Exit:** first business can create a tenant, add a team member, and log its first lead in under 15 minutes without developer help.
 
 ## 9. Test Strategy
 
@@ -225,3 +230,12 @@ Use factories that always require an explicit business. Do not create unscoped t
 3. Multi-business memberships for consultants/franchise owners; current v1 intentionally supports one business per user.
 4. Industry-specific fields, warranty durations, and lead sources.
 5. Retention/deletion policy and regional compliance requirements before broad commercial launch.
+
+## 12. Progress so far
+
+- Core tenant boundaries, role-aware APIs, and cross-tenant tests are established.
+- The server-rendered workspace supports onboarding, lead management, activities, a Kanban pipeline, task workflows, team/service management, settings, and reports.
+- Follow-up services and Celery entry points exist for quote, delayed, warranty, stale, and overdue workflows.
+- The dashboard now combines daily attention metrics with pipeline-stage and source-conversion analytics.
+- A collapsible, scrollable desktop navigation and responsive mobile navigation are implemented.
+- `Smith LLC` has a reusable 2,000-record demo dataset for realistic dashboard, leads, and follow-up testing.
