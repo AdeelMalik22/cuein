@@ -37,6 +37,58 @@
                 href="{% url 'web:lead-list' %}">Review opportunities <span aria-hidden="true">→</span></a></article>
     </section>
 
+    <section class="dashboard-analytics" aria-labelledby="analytics-heading">
+        <div class="analytics-heading">
+            <div>
+                <p class="eyebrow">ANALYTICS SNAPSHOT</p>
+                <h2 id="analytics-heading">See the shape of your pipeline.</h2>
+                <p>Quick signals about where leads are sitting and which channels turn into customers.</p>
+            </div>
+            <a class="quiet-link" href="{% url 'web:reports' %}">Full reports <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="analytics-grid">
+            <article class="panel analytics-stage-panel">
+                <div class="panel-heading analytics-panel-heading">
+                    <div><p class="eyebrow">PIPELINE MIX</p>
+                        <h2>Where leads are now</h2>
+                        <p class="panel-intro">Every stage, including the outcomes.</p></div>
+                    <span class="analytics-stat"><strong>{{ active_leads_count }}</strong><small>open now</small></span>
+                </div>
+                <ul class="stage-chart" aria-label="Lead count by pipeline stage">
+                    {% for stage in analytics_stage_rows %}
+                        <li class="stage-chart-column">
+                            <span class="sr-only">{{ stage.label }}: {{ stage.total }} lead{{ stage.total|pluralize }}</span>
+                            <span class="stage-chart-total" aria-hidden="true">{{ stage.total }}</span>
+                            <span class="stage-chart-plot" aria-hidden="true"><i class="stage-chart-bar {% if stage.value == 'won' %}is-won{% elif stage.value == 'lost' %}is-lost{% endif %}" style="height: {{ stage.height }}%"></i></span>
+                            <span class="stage-chart-label" title="{{ stage.label }}" aria-hidden="true">{{ stage.short_label }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </article>
+
+            <article class="panel analytics-source-panel">
+                <div class="panel-heading analytics-panel-heading">
+                    <div><p class="eyebrow">SOURCE QUALITY</p>
+                        <h2>Which channels convert</h2>
+                        <p class="panel-intro">Top sources by lead volume.</p></div>
+                    <span class="analytics-stat"><strong>{% if analytics_closed_count %}{{ analytics_win_rate }}%{% else %}—{% endif %}</strong><small>win rate</small></span>
+                </div>
+                <div class="source-performance-chart">
+                    {% for source in analytics_source_rows %}
+                        <div class="source-performance-row">
+                            <div><strong>{{ source.label }}</strong><small>{{ source.won }} won from {{ source.total }} lead{{ source.total|pluralize }}</small></div>
+                            <div class="source-performance-track" aria-label="{{ source.conversion }} percent conversion"><i style="width: {{ source.width }}%"></i></div>
+                            <b>{{ source.conversion }}%</b>
+                        </div>
+                    {% empty %}
+                        <div class="empty-state compact-empty">Source performance will appear after the first lead is added.</div>
+                    {% endfor %}
+                </div>
+                {% if analytics_source_rows %}<p class="panel-footnote">Bars show the share of leads from each source that became customers.</p>{% endif %}
+            </article>
+        </div>
+    </section>
+
     <section class="overview-grid">
         <article class="panel priority-panel">
             <div class="panel-heading">

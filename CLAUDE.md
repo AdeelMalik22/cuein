@@ -2,77 +2,96 @@
 
 ## Project purpose
 
-Cuein is a lightweight follow-up and sales-memory tool for small service businesses. Its core promise is that an active lead should never be silently forgotten.
+Cuein is a lightweight lead follow-up and sales-memory tool for small service businesses. Its core promise is that an active lead should never be silently forgotten.
 
-This project is deliberately being built step by step so the user can understand how a Django multi-tenant application works from scratch.
+The project is a Django multi-tenant application with both a server-rendered web workspace and a JWT-protected REST API. Keep the product focused on its main loop: capture a lead, move it through the pipeline, record activity, and make the next follow-up visible.
 
-## Stack
+## Current stack
 
-- Python 3.10 and Django 5.2
-- Django REST Framework
-- Simple JWT for API authentication
-- PostgreSQL with `psycopg`
-- Redis/Celery are planned for reminders, but are not implemented yet.
+- Python 3.10, Django 5.2, Django REST Framework, and Simple JWT.
+- PostgreSQL through `psycopg`.
+- Server-rendered Django templates with a shared CSS file and small progressive JavaScript enhancements; there is no React/Vite frontend.
+- Celery and Redis for asynchronous follow-up scheduling and periodic overdue/stale-lead sweeps.
+- Faker for development/demo data.
 
 ## Repository layout
 
 ```text
-cuein/          Django project settings and root URLs
-core/           Business tenant, custom User, auth, team APIs, permissions
-leads/          Product and Lead models and tenant-scoped APIs
-plan.md         Product delivery plan
+cuein/          Django settings, Celery configuration, and root URLs
+core/           Business tenant, custom User, auth/team APIs, permissions
+leads/          Product, Lead, Activity models and tenant-scoped APIs
+followups/      Follow-up tasks, notifications, rules, services, Celery tasks
+web/            Server-rendered workspace views, templates, CSS, and JS
+seed.py         Generic seed plus targeted Smith LLC dashboard demo data
+plan.md         Delivery plan and current implementation status
 PRD-FollowUpCRM.md  Product requirements
 ```
 
 ## Local commands
 
-Run commands from the repository root using the existing virtual environment:
+Run commands from the repository root using the Python environment that has the project dependencies installed:
 
 ```bash
-venv/bin/python manage.py check
-venv/bin/python manage.py makemigrations
-venv/bin/python manage.py migrate
-venv/bin/python manage.py test
-venv/bin/python manage.py runserver
+python3.10 manage.py check
+python3.10 manage.py makemigrations
+python3.10 manage.py migrate
+python3.10 manage.py test
+python3.10 manage.py runserver
 ```
 
-The local PostgreSQL connection values belong in the root `.env` file. Do not commit `.env` or copy its secrets into source code.
+The local PostgreSQL connection values belong in the root `.env` file. Do not commit `.env` or copy its secrets into source code, docs, or logs.
 
-## Multi-tenant rules — non-negotiable
+For demo data, `python3.10 seed.py --smith-llc-demo` adds an idempotent batch of 2,000 realistic leads to the existing `Smith LLC` tenant only. Do not run `seed.py` without this flag when you only need the Smith LLC data: the legacy default seed creates new sample businesses.
+
+## Tenant rules — non-negotiable
 
 - `Business` is the tenant boundary.
-- Every tenant-owned model must inherit `core.models.TenantScopedModel`; this creates its required `business` foreign key.
-- `Business` itself and the custom `User` do not inherit from the tenant base. A User has its own direct `business` relationship.
+- Every tenant-owned model inherits `core.models.TenantScopedModel`, which provides its required `business` foreign key. `Business` and the custom `User` are the exceptions; a user has its own direct business relationship.
 - Never accept `business_id` from an API request body, query string, or URL as the source of tenant identity.
-- Scope API querysets from `request.user.business` first, for example: `Lead.objects.for_business(request.user.business)`.
-- Related objects such as Products and assigned Users must be validated as belonging to the same business.
-- A cross-tenant object lookup must return `404`, never leak data or object existence.
-- Celery/background jobs added later must receive and validate `business_id` explicitly; they cannot rely on request context.
+- Scope API and web querysets from `request.user.business` first, for example `Lead.objects.for_business(request.user.business)`.
+- Validate that related Products, Leads, and assigned Users belong to the same business.
+- Cross-tenant detail lookups must return `404`; never leak object existence.
+- Celery/background jobs must receive and validate `business_id` explicitly because they do not have request context.
 - Every new tenant-owned endpoint needs a cross-tenant isolation test.
 
-## Current roles
+## Roles and visibility
 
-- **Owner:** manages the business, team, products, and all tenant leads.
-- **Manager:** manages products and all tenant leads, including assignments.
-- **Salesperson:** sees and edits only assigned leads; cannot reassign or delete them.
+- **Owner:** manages the business, team, services, and all tenant leads/tasks.
+- **Manager:** sees all tenant leads/tasks, dashboard data, and reports; owner-only settings and team management remain restricted in the web workspace.
+- **Salesperson:** sees and edits only assigned leads/tasks and cannot reassign them.
 
-## Current API conventions
+## Current product surfaces
+
+- Public landing page, signup, onboarding, login/logout, and business settings.
+- Lead quick-add, editable detail view, activity timeline, search/filtering, stage changes, and a drag-and-drop Kanban board.
+- Follow-up list with due, overdue, complete, and reschedule workflows.
+- Owner/manager dashboard with task attention, pipeline value, team pulse, stage distribution, source conversion, and win-rate analytics.
+- Reports for conversion by source/salesperson, time to close by service, and lost reasons.
+- Responsive UI with a scrollable, collapsible desktop navigation sidebar. Its state is stored in browser local storage.
+
+## API conventions
 
 - All API routes start with `/api/v1/` and use trailing slashes.
 - API authentication is JWT. Use `/api/v1/auth/token/` to obtain tokens.
-- Use dedicated actions for stateful workflow changes, such as `POST /api/v1/leads/{id}/transition/`; do not add stage changes to generic PATCH behavior.
-- Lists are paginated. Keep filtering, ordering, and search server-side.
+- Lists are paginated, and filtering/search/ordering stay server-side.
+- Use dedicated actions for workflow changes, such as `POST /api/v1/leads/{id}/transition/`, `POST /api/v1/leads/{id}/needs-time/`, and task complete/reschedule actions; do not hide state transitions in generic PATCH behavior.
 
 ## Coding rules
 
 - Read this file before starting work.
-- Build one small, working change at a time. Explain the immediate goal in plain language before changing code.
+- Build one small, working change at a time and state the immediate goal in plain language before editing.
 - Prefer simple, explicit code over abstractions that hide tenant ownership.
-- Keep tenant ownership visible in models, querysets, serializers, permissions, views, and tests.
-- Make focused, surgical changes; do not rewrite unrelated code.
-- Create migrations only with Django commands (`manage.py makemigrations`). Never hand-write migration files.
-- Run `manage.py check` and migration checks after model/API changes. Run relevant tests when PostgreSQL is available.
-- Do not create files beyond the user’s requested scope.
-- Do not create or rewrite implementation documents unless the user explicitly asks. `CLAUDE.md` and `README.md` may be updated when requested.
-- Do not expose passwords, tokens, or values from `.env` in code, logs, or documentation.
+- Keep tenant ownership visible in models, querysets, serializers, permissions, views, background jobs, and tests.
+- Make focused changes; do not rewrite unrelated work or overwrite user changes.
+- Create migrations only with Django commands (`manage.py makemigrations`); never hand-write migration files.
+- Run `manage.py check` after Django changes and the focused tests when PostgreSQL is available.
+- Preserve the server-rendered/progressive-enhancement approach unless the user explicitly requests a frontend architecture change.
+- Do not expose passwords, tokens, `.env` values, or seeded credentials in source code, docs, or logs.
 
+## Progress so far
+
+- Multi-tenant business, user, product, lead, activity, task, and notification models are in place with tenant-scoped APIs and isolation tests.
+- The lead workflow, seven-stage board, activity timeline, task workflows, and role-aware web workspace are implemented.
+- Celery task wrappers, idempotent follow-up scheduling, overdue marking, stale-lead escalation, and notification creation are implemented.
+- Dashboard/reporting views now include operational metrics plus pipeline and source-conversion analytics.
+- The workspace includes responsive navigation, a collapsible desktop sidebar, and a targeted, idempotent Smith LLC demo-data seed.

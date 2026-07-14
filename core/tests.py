@@ -27,7 +27,7 @@ class CurrentUserApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['username'], 'adeel')
-        self.assertEqual(response.data['business']['id'], self.business.id)
+        self.assertEqual(response.data['business']['id'], str(self.business.id))
         self.assertEqual(response.data['business']['name'], 'North Star Solar')
 
 

@@ -36,7 +36,7 @@ class FollowUpApiTests(APITestCase):
         response = self.client.get(reverse('follow-up-task-list'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
-        self.assertEqual(response.data['results'][0]['id'], salesperson_task.id)
+        self.assertEqual(response.data['results'][0]['id'], str(salesperson_task.id))
 
     def test_completion_creates_a_next_action(self):
         task = FollowUpTask.objects.create(business=self.business, lead=self.lead, assigned_user=self.salesperson, due_at=timezone.now() + timedelta(days=1), description='Call Ali')
