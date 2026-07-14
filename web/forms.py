@@ -1,11 +1,12 @@
 from django import forms
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
-from core.models import Business, User
+from core.models import Business, PendingRegistration, User
 from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product
 
@@ -21,6 +22,8 @@ class SignupForm(forms.Form):
         email = self.cleaned_data['email'].strip().lower()
         if User.objects.filter(email__iexact=email).exists():
             raise ValidationError('An account already uses this email. Sign in instead.')
+        if PendingRegistration.objects.filter(email__iexact=email).exists():
+            raise ValidationError('A verification code is already waiting for this address. Check your inbox or request a new code.')
         return email
 
     def clean_password(self):
@@ -37,16 +40,57 @@ class SignupForm(forms.Form):
         base_username = slugify(email.split('@', 1)[0]).replace('-', '')[:140] or 'owner'
         username = base_username
         suffix = 2
-        while User.objects.filter(username=username).exists():
+        while User.objects.filter(username=username).exists() or PendingRegistration.objects.filter(username=username).exists():
             username = f'{base_username[:140]}{suffix}'
             suffix += 1
-        business = Business.objects.create(
-            name=self.cleaned_data['business_name'], industry=self.cleaned_data['industry'], timezone='Asia/Karachi',
+        return PendingRegistration.objects.create(
+            business_name=self.cleaned_data['business_name'],
+            industry=self.cleaned_data['industry'],
+            timezone='Asia/Karachi',
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            password=make_password(self.cleaned_data['password']),
         )
-        return User.objects.create_user(
-            username=username, email=email, first_name=first_name, last_name=last_name,
-            password=self.cleaned_data['password'], business=business, role=User.Role.OWNER,
-        )
+
+
+class EmailVerificationResendForm(forms.Form):
+    email = forms.EmailField(widget=forms.EmailInput(attrs={
+        'autocomplete': 'email',
+        'placeholder': 'name@company.com',
+    }))
+
+    def clean_email(self):
+        return self.cleaned_data['email'].strip().lower()
+
+
+class EmailVerificationCodeForm(forms.Form):
+    email = forms.EmailField(widget=forms.EmailInput(attrs={
+        'autocomplete': 'email',
+        'placeholder': 'name@company.com',
+    }))
+    code = forms.CharField(
+        max_length=6,
+        min_length=6,
+        widget=forms.TextInput(attrs={
+            'autocomplete': 'one-time-code',
+            'inputmode': 'numeric',
+            'maxlength': '6',
+            'pattern': '[0-9]{6}',
+            'placeholder': '123456',
+            'class': 'verification-code-input',
+        }),
+    )
+
+    def clean_email(self):
+        return self.cleaned_data['email'].strip().lower()
+
+    def clean_code(self):
+        code = self.cleaned_data['code'].strip()
+        if len(code) != 6 or not code.isascii() or not code.isdigit():
+            raise ValidationError('Enter the six-digit code from your email.')
+        return code
 
 
 class TeamUserForm(forms.ModelForm):

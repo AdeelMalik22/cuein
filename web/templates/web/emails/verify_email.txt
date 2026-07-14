@@ -1,0 +1,11 @@
+Hi {{ registration.first_name|default:registration.username }},
+
+Thanks for registering {{ registration.business_name }} with Cuein. Enter this six-digit code in Cuein to create and activate the workspace:
+
+{{ verification_code }}
+
+This code expires in {{ verification_timeout_hours }} hour{{ verification_timeout_hours|pluralize }}. Never share it with anyone.
+
+If you did not create this workspace, you can safely ignore this email.
+
+Cuein

@@ -107,6 +107,34 @@ class User(AbstractUser):
         default=Role.SALESPERSON,
     )
     phone = models.CharField(max_length=32, blank=True)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    email_verification_sent_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.get_username()
+
+
+class PendingRegistration(models.Model):
+    """Signup details held only until the owner confirms their email address."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    business_name = models.CharField(max_length=255)
+    industry = models.CharField(max_length=32, choices=Business.Industry.choices, default=Business.Industry.OTHER)
+    timezone = models.CharField(max_length=64, default='Asia/Karachi')
+    username = models.CharField(max_length=150, unique=True)
+    first_name = models.CharField(max_length=150, blank=True)
+    last_name = models.CharField(max_length=150, blank=True)
+    email = models.EmailField(unique=True)
+    phone = models.CharField(max_length=32, blank=True)
+    password = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    verification_code_hash = models.CharField(max_length=128, blank=True)
+    verification_attempts = models.PositiveSmallIntegerField(default=0)
+    verification_sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'pending registration'
+        verbose_name_plural = 'pending registrations'
+
+    def __str__(self):
+        return f'{self.business_name} ({self.email})'

@@ -1,0 +1,72 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify your email · Cuein</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'web/app.css' %}">
+</head>
+<body class="auth-body auth-login-body verification-page">
+  <main class="verification-shell">
+    <a class="wordmark" href="{% url 'web:landing' %}"><span>c</span>uein</a>
+    <section class="auth-card login-card verification-card">
+      <div class="verification-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m4 7 8 6 8-6"></path><path d="m9.5 16 1.6 1.6 3.5-3.6"></path></svg>
+      </div>
+      <div class="auth-card-heading verification-heading">
+        <p class="eyebrow">EMAIL VERIFICATION</p>
+        <h1>Confirm your email.</h1>
+        {% if pending_email %}
+          <p>We sent a six-digit code to <strong>{{ pending_email }}</strong>. Enter it below to create your workspace.</p>
+        {% else %}
+          <p>Enter the registration email and the six-digit code from your inbox to create your workspace.</p>
+        {% endif %}
+      </div>
+
+      {% if messages %}
+        <div class="verification-messages" aria-live="polite">
+          {% for message in messages %}<p class="verification-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</p>{% endfor %}
+        </div>
+      {% endif %}
+
+      <form method="post" action="{% url 'web:email-verify' %}" class="auth-form auth-form-single verification-form">
+        {% csrf_token %}
+        {% if pending_email %}
+          <input type="hidden" name="email" value="{{ pending_email }}">
+          <div class="verification-recipient"><span>Verification code sent to</span><strong>{{ pending_email }}</strong></div>
+        {% else %}
+          <label class="field field-wide"><span>Email address</span>{{ verification_form.email }}</label>
+        {% endif %}
+        <label class="field field-wide verification-code-field"><span>Six-digit code</span>{{ verification_form.code }}<small>It expires in {{ verification_timeout_hours }} hour{{ verification_timeout_hours|pluralize }}.</small></label>
+        <button class="button button-dark field-wide" type="submit">Verify and create workspace <span aria-hidden="true">→</span></button>
+      </form>
+
+      <section class="verification-resend-panel">
+        <div><strong>Didn’t receive a code?</strong><p>Check Spam, then request a fresh code.</p></div>
+        {% if pending_email %}
+          <form method="post" action="{% url 'web:email-verification-resend' %}">
+            {% csrf_token %}
+            <input type="hidden" name="email" value="{{ pending_email }}">
+            <button class="verification-resend-button" type="submit">Resend code</button>
+          </form>
+        {% else %}
+          <details class="verification-resend-details">
+            <summary>Resend code</summary>
+            <form method="post" action="{% url 'web:email-verification-resend' %}" class="verification-resend-form">
+              {% csrf_token %}
+              <label class="field"><span>Registration email</span>{{ resend_form.email }}</label>
+              <button class="verification-resend-button" type="submit">Send new code</button>
+            </form>
+          </details>
+        {% endif %}
+      </section>
+
+      <p class="auth-switch verification-switch">Already verified? <a href="{% url 'web:login' %}">Sign in</a><span>·</span><a href="{% url 'web:signup' %}">Register another business</a></p>
+    </section>
+  </main>
+</body>
+</html>
