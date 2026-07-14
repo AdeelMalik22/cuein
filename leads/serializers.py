@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.urls import reverse
 
 from core.models import User
 
@@ -68,6 +69,33 @@ class LeadSerializer(serializers.ModelSerializer):
         if assigned_user and not assigned_user.is_active:
             raise serializers.ValidationError({'assigned_user': 'The assigned user must be active.'})
         return attrs
+
+
+class LeadKanbanCardSerializer(serializers.ModelSerializer):
+    """The intentionally small payload used when the board loads more cards."""
+
+    product_name = serializers.CharField(source='product.name', read_only=True, default=None)
+    detail_url = serializers.SerializerMethodField()
+    transition_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Lead
+        fields = (
+            'id',
+            'customer_name',
+            'product_name',
+            'stage',
+            'quoted_price',
+            'last_activity_at',
+            'detail_url',
+            'transition_url',
+        )
+
+    def get_detail_url(self, lead):
+        return reverse('web:lead-detail', kwargs={'pk': lead.pk})
+
+    def get_transition_url(self, lead):
+        return reverse('web:lead-stage', kwargs={'pk': lead.pk})
 
 
 class LeadTransitionSerializer(serializers.Serializer):

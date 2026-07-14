@@ -2,17 +2,27 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from core.models import User
 from core.permissions import IsBusinessManagerOrOwner
 
+from .cache import (
+    cache_lead_response,
+    get_cached_lead_response,
+    invalidate_business_lead_cache,
+    lead_api_cache_key,
+)
 from .models import Lead, Product
 from .serializers import (
     LeadAssignmentSerializer,
+    LeadKanbanCardSerializer,
     LeadSerializer,
     LeadTransitionSerializer,
     ProductSerializer,
@@ -20,6 +30,18 @@ from .serializers import (
 from followups.rules import rule_for_stage
 from followups.rules import DELAYED_FOLLOWUP
 from followups.tasks import schedule_follow_up
+
+
+class LeadPageNumberPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+
+class LeadKanbanPagination(LimitOffsetPagination):
+    default_limit = 10
+    limit_query_param = 'limit'
+    max_limit = 100
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -38,18 +60,36 @@ class ProductViewSet(viewsets.ModelViewSet):
         return (IsAuthenticated(),)
 
     def perform_create(self, serializer):
-        serializer.save(business=self.request.user.business)
+        product = serializer.save(business=self.request.user.business)
+        transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
+
+    def perform_update(self, serializer):
+        product = serializer.save()
+        transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
+
+    def perform_destroy(self, instance):
+        business_id = instance.business_id
+        instance.delete()
+        transaction.on_commit(lambda: invalidate_business_lead_cache(business_id))
 
 
 class LeadViewSet(viewsets.ModelViewSet):
     serializer_class = LeadSerializer
+    pagination_class = LeadPageNumberPagination
     filter_backends = (filters.SearchFilter, filters.OrderingFilter)
     search_fields = ('customer_name', 'phone', 'email')
     ordering_fields = ('created_at', 'updated_at', 'last_activity_at', 'quoted_price')
-    ordering = ('-updated_at',)
+    ordering = ('-last_activity_at', '-id')
 
     def get_queryset(self):
-        queryset = Lead.objects.for_business(self.request.user.business).select_related('product', 'assigned_user')
+        queryset = Lead.objects.for_business(self.request.user.business)
+        if self.action == 'kanban':
+            queryset = queryset.select_related('product').only(
+                'id', 'customer_name', 'stage', 'quoted_price', 'last_activity_at', 'product_id', 'product__id',
+                'product__name',
+            )
+        else:
+            queryset = queryset.select_related('product', 'assigned_user')
         if self.request.user.role == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
 
@@ -58,6 +98,11 @@ class LeadViewSet(viewsets.ModelViewSet):
             if value:
                 queryset = queryset.filter(**{field: value})
         return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'kanban':
+            return LeadKanbanCardSerializer
+        return super().get_serializer_class()
 
     def get_permissions(self):
         if self.action in ('destroy', 'assign'):
@@ -68,12 +113,47 @@ class LeadViewSet(viewsets.ModelViewSet):
         assigned_user = serializer.validated_data.get('assigned_user', self.request.user)
         if self.request.user.role == User.Role.SALESPERSON:
             assigned_user = self.request.user
-        serializer.save(business=self.request.user.business, assigned_user=assigned_user)
+        lead = serializer.save(business=self.request.user.business, assigned_user=assigned_user)
+        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
 
     def perform_update(self, serializer):
         if self.request.user.role == User.Role.SALESPERSON and 'assigned_user' in self.request.data:
             raise ValidationError({'assigned_user': 'Salespeople cannot reassign leads.'})
-        serializer.save()
+        lead = serializer.save()
+        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+
+    def perform_destroy(self, instance):
+        business_id = instance.business_id
+        instance.delete()
+        transaction.on_commit(lambda: invalidate_business_lead_cache(business_id))
+
+    def list(self, request, *args, **kwargs):
+        cache_key = lead_api_cache_key(
+            business_id=request.user.business_id,
+            user=request.user,
+            action=self.action,
+            query_params=request.query_params,
+        )
+        cached_payload = get_cached_lead_response(cache_key)
+        if cached_payload is not None:
+            return Response(cached_payload)
+
+        response = super().list(request, *args, **kwargs)
+        if response.status_code == status.HTTP_200_OK:
+            cache_lead_response(cache_key, response.data)
+        return response
+
+    @action(
+        detail=False,
+        methods=('get',),
+        url_path='kanban',
+        authentication_classes=(SessionAuthentication, JWTAuthentication),
+    )
+    def kanban(self, request):
+        if request.query_params.get('stage') not in Lead.Stage.values:
+            raise ValidationError({'stage': 'Choose a valid pipeline stage.'})
+        self.pagination_class = LeadKanbanPagination
+        return self.list(request)
 
     @action(detail=True, methods=('post',))
     def assign(self, request, pk=None):
@@ -82,12 +162,19 @@ class LeadViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         lead.assigned_user = serializer.validated_data['assigned_user']
         lead.save(update_fields=('assigned_user', 'updated_at'))
+        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         return Response(LeadSerializer(lead, context={'request': request}).data)
 
     @action(detail=True, methods=('post',))
     def transition(self, request, pk=None):
         with transaction.atomic():
-            lead = get_object_or_404(self.get_queryset().select_for_update(), pk=pk)
+            # Lock the lead row itself. The normal list queryset joins the
+            # nullable product relation, which PostgreSQL correctly refuses
+            # to lock with FOR UPDATE.
+            locked_queryset = Lead.objects.for_business(request.user.business)
+            if request.user.role == User.Role.SALESPERSON:
+                locked_queryset = locked_queryset.filter(assigned_user=request.user)
+            lead = get_object_or_404(locked_queryset.select_for_update(), pk=pk)
             serializer = LeadTransitionSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
@@ -102,6 +189,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 transaction.on_commit(
                     lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), rule.key)
                 )
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
 
         return Response(LeadSerializer(lead, context={'request': request}).data)
 

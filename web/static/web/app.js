@@ -26,31 +26,200 @@
     window.setTimeout(function () { element.remove(); }, 4200);
   }
 
-  function updateColumnCount(column, change) {
-    var count = column.querySelector("header strong");
-    if (!count) return;
-    count.textContent = Math.max(0, Number(count.textContent || 0) + change);
+  function columnNumber(column, name) {
+    return Number(column.dataset[name] || 0);
+  }
+
+  function cardCount(column) {
+    return column.querySelectorAll(".kanban-dropzone .lead-card").length;
+  }
+
+  function syncColumnEmptyState(column) {
+    var dropzone = column.querySelector(".kanban-dropzone");
+    if (!dropzone) return;
+    var empty = dropzone.querySelector(".column-empty");
+    if (!cardCount(column) && columnNumber(column, "total") === 0) {
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.className = "column-empty";
+        empty.textContent = "No leads here";
+        dropzone.appendChild(empty);
+      }
+    } else if (empty) {
+      empty.remove();
+    }
+  }
+
+  function setColumnState(column, total, shown) {
+    total = Math.max(0, total);
+    shown = Math.max(0, shown);
+    column.dataset.total = String(total);
+    column.dataset.shown = String(shown);
+    column.dataset.nextOffset = String(shown);
+
+    var count = column.querySelector("[data-column-total]");
+    if (count) count.textContent = String(total);
+    var summary = column.querySelector("[data-column-summary]");
+    if (summary) summary.textContent = "Showing " + shown + " of " + total;
+    var loadMore = column.querySelector("[data-load-more]");
+    if (loadMore) loadMore.hidden = shown >= total;
+    syncColumnEmptyState(column);
+  }
+
+  function updateColumnAfterMove(column, totalChange) {
+    setColumnState(column, columnNumber(column, "total") + totalChange, cardCount(column));
+  }
+
+  function relativeActivityTime(value) {
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Recently";
+    var seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+    if (seconds < 60) return "Just now";
+    var units = [
+      [31536000, "year"],
+      [2592000, "month"],
+      [86400, "day"],
+      [3600, "hour"],
+      [60, "minute"]
+    ];
+    for (var index = 0; index < units.length; index += 1) {
+      var unit = units[index];
+      if (seconds >= unit[0]) {
+        var amount = Math.floor(seconds / unit[0]);
+        return amount + " " + unit[1] + (amount === 1 ? "" : "s") + " ago";
+      }
+    }
+    return "Recently";
+  }
+
+  function quotedPrice(value) {
+    var number = Number(value);
+    if (!value || Number.isNaN(number) || number <= 0) return "No quote yet";
+    return "Rs " + new Intl.NumberFormat("en-PK", { maximumFractionDigits: 0 }).format(number);
+  }
+
+  function leadCardFromPayload(lead) {
+    var card = document.createElement("article");
+    card.className = "lead-card";
+    card.draggable = true;
+    card.dataset.leadId = lead.id;
+    card.dataset.stage = lead.stage;
+    card.dataset.transitionUrl = lead.transition_url;
+    card.dataset.detailUrl = lead.detail_url;
+
+    var link = document.createElement("a");
+    link.className = "lead-card-link";
+    link.href = lead.detail_url;
+
+    var top = document.createElement("div");
+    top.className = "lead-card-top";
+    var name = document.createElement("strong");
+    name.textContent = lead.customer_name;
+    var arrow = document.createElement("span");
+    arrow.className = "lead-card-arrow";
+    arrow.setAttribute("aria-hidden", "true");
+    arrow.textContent = "↗";
+    top.appendChild(name);
+    top.appendChild(arrow);
+
+    var product = document.createElement("p");
+    product.textContent = lead.product_name || "Service to be confirmed";
+
+    var meta = document.createElement("div");
+    meta.className = "lead-card-meta";
+    var price = document.createElement("span");
+    price.textContent = quotedPrice(lead.quoted_price);
+    var activity = document.createElement("time");
+    activity.dateTime = lead.last_activity_at;
+    activity.textContent = relativeActivityTime(lead.last_activity_at);
+    meta.appendChild(price);
+    meta.appendChild(activity);
+
+    link.appendChild(top);
+    link.appendChild(product);
+    link.appendChild(meta);
+    card.appendChild(link);
+    return card;
+  }
+
+  function columnAlreadyShowsLead(column, leadId) {
+    return Array.prototype.some.call(column.querySelectorAll(".lead-card"), function (card) {
+      return card.dataset.leadId === String(leadId);
+    });
+  }
+
+  function setLoadMoreBusy(button, busy) {
+    if (busy) {
+      button.dataset.label = button.textContent;
+      button.textContent = "Loading…";
+      button.disabled = true;
+    } else {
+      button.textContent = button.dataset.label || "Load more";
+      button.disabled = false;
+    }
+  }
+
+  function loadMoreLeads(board, column, button) {
+    var apiUrl = board.dataset.kanbanApiUrl;
+    if (!apiUrl || button.disabled) return;
+    var params = new URLSearchParams({
+      stage: column.dataset.stage,
+      limit: "10",
+      offset: String(columnNumber(column, "shown"))
+    });
+    if (board.dataset.search) params.set("search", board.dataset.search);
+    var separator = apiUrl.indexOf("?") === -1 ? "?" : "&";
+    setLoadMoreBusy(button, true);
+
+    fetch(apiUrl + separator + params.toString(), {
+      headers: { "Accept": "application/json" },
+      credentials: "same-origin"
+    }).then(function (response) {
+      if (!response.ok) throw new Error("lead page failed");
+      return response.json();
+    }).then(function (payload) {
+      if (!payload || !Array.isArray(payload.results)) throw new Error("invalid lead page");
+      var dropzone = column.querySelector(".kanban-dropzone");
+      payload.results.forEach(function (lead) {
+        if (!columnAlreadyShowsLead(column, lead.id)) dropzone.appendChild(leadCardFromPayload(lead));
+      });
+      setColumnState(column, Number(payload.count || 0), cardCount(column));
+      if (!payload.results.length) button.hidden = true;
+    }).catch(function () {
+      notice("Cuein could not load more leads. Please try again.");
+    }).finally(function () {
+      setLoadMoreBusy(button, false);
+    });
   }
 
   function setUpKanban() {
     var board = document.querySelector("[data-kanban]");
-    if (!board || !("draggable" in document.createElement("span"))) return;
+    if (!board) return;
 
+    board.addEventListener("click", function (event) {
+      var loadMore = event.target.closest("[data-load-more]");
+      if (!loadMore || !board.contains(loadMore)) return;
+      loadMoreLeads(board, loadMore.closest(".kanban-column"), loadMore);
+    });
+
+    if (!("draggable" in document.createElement("span"))) return;
     var draggedCard = null;
-    board.querySelectorAll(".lead-card").forEach(function (card) {
-      card.addEventListener("dragstart", function (event) {
-        draggedCard = card;
-        card.classList.add("is-dragging");
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", card.dataset.detailUrl || "");
+
+    board.addEventListener("dragstart", function (event) {
+      var card = event.target.closest(".lead-card");
+      if (!card || !board.contains(card)) return;
+      draggedCard = card;
+      card.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.detailUrl || "");
+    });
+
+    board.addEventListener("dragend", function () {
+      if (draggedCard) draggedCard.classList.remove("is-dragging");
+      board.querySelectorAll(".kanban-column").forEach(function (column) {
+        column.classList.remove("is-drop-target");
       });
-      card.addEventListener("dragend", function () {
-        card.classList.remove("is-dragging");
-        board.querySelectorAll(".kanban-column").forEach(function (column) {
-          column.classList.remove("is-drop-target");
-        });
-        draggedCard = null;
-      });
+      draggedCard = null;
     });
 
     board.querySelectorAll(".kanban-column").forEach(function (column) {
@@ -74,12 +243,13 @@
           return;
         }
 
-        var sourceColumn = draggedCard.closest(".kanban-column");
+        var card = draggedCard;
+        var sourceColumn = card.closest(".kanban-column");
         var destination = column.querySelector(".kanban-dropzone");
-        var originalStage = draggedCard.dataset.stage;
-        draggedCard.classList.add("is-dragging");
+        var originalStage = card.dataset.stage;
+        card.classList.add("is-dragging");
 
-        fetch(draggedCard.dataset.transitionUrl, {
+        fetch(card.dataset.transitionUrl, {
           method: "POST",
           headers: {
             "Accept": "application/json",
@@ -93,16 +263,16 @@
           if (!response.ok) throw new Error("stage update failed");
           return response.json();
         }).then(function () {
-          destination.prepend(draggedCard);
-          draggedCard.dataset.stage = column.dataset.stage;
-          updateColumnCount(sourceColumn, -1);
-          updateColumnCount(column, 1);
+          destination.prepend(card);
+          card.dataset.stage = column.dataset.stage;
+          updateColumnAfterMove(sourceColumn, -1);
+          updateColumnAfterMove(column, 1);
           notice("Lead moved to " + (column.querySelector("header h2") || {}).textContent + ".");
         }).catch(function () {
-          draggedCard.dataset.stage = originalStage;
+          card.dataset.stage = originalStage;
           notice("Cuein could not move this lead. Open it and try again.");
         }).finally(function () {
-          draggedCard.classList.remove("is-dragging");
+          card.classList.remove("is-dragging");
         });
       });
     });

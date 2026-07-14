@@ -75,6 +75,10 @@ class Lead(TenantScopedModel):
     class Meta:
         indexes = [
             models.Index(fields=('business', 'stage')),
+            models.Index(
+                fields=('business', 'stage', '-last_activity_at'),
+                name='lead_biz_stage_activity_idx',
+            ),
             models.Index(fields=('business', 'assigned_user', 'last_activity_at')),
             models.Index(fields=('business', 'created_at')),
         ]

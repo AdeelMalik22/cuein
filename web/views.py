@@ -1,4 +1,5 @@
 from datetime import timedelta
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from django.contrib import messages
@@ -6,7 +7,7 @@ from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
-from django.http import HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views import View
@@ -16,6 +17,7 @@ from core.models import User
 from followups.models import FollowUpTask
 from followups.rules import DELAYED_FOLLOWUP, rule_for_stage
 from followups.tasks import schedule_follow_up
+from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product
 
 from .forms import (
@@ -277,38 +279,151 @@ class DashboardView(TenantWebMixin, TemplateView):
         })
         return context
 
-class LeadListView(TenantWebMixin, ListView):
+class LeadListView(TenantWebMixin, TemplateView):
     template_name = 'web/lead_list.html'
-    context_object_name = 'leads'
-    paginate_by = None
+    BOARD_PAGE_SIZE = 10
 
-    def get_queryset(self):
-        queryset = self.visible_leads()
-        stage = self.request.GET.get('stage')
-        search = self.request.GET.get('q')
+    def get_board_queryset(self):
+        # The board needs only card fields. Keeping this separate from
+        # visible_leads() avoids loading assignees and contact data for every
+        # record before the seven columns are rendered.
+        queryset = Lead.objects.for_business(self.get_business()).select_related('product')
+        if self.request.user.role == User.Role.SALESPERSON:
+            queryset = queryset.filter(assigned_user=self.request.user)
+
+        stage = self.request.GET.get('stage', '')
+        search = self.request.GET.get('q', '').strip()
         if stage in Lead.Stage.values:
             queryset = queryset.filter(stage=stage)
         if search:
             queryset = queryset.filter(
                 Q(customer_name__icontains=search) | Q(phone__icontains=search) | Q(email__icontains=search),
             )
-        return queryset.order_by('-last_activity_at')
+        return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        board_leads = list(context['leads'])
-        leads_by_stage = {value: [] for value, _label in Lead.Stage.choices}
-        for lead in board_leads:
-            leads_by_stage[lead.stage].append(lead)
+        queryset = self.get_board_queryset()
+        totals = {
+            row['stage']: row['total']
+            for row in queryset.values('stage').annotate(total=Count('id'))
+        }
+        card_fields = (
+            'id', 'customer_name', 'stage', 'quoted_price', 'last_activity_at', 'product_id', 'product__id',
+            'product__name',
+        )
+        pipeline_columns = []
+        for value, label in Lead.Stage.choices:
+            total = totals.get(value, 0)
+            leads = list(
+                queryset.filter(stage=value).order_by('-last_activity_at', '-id').only(*card_fields)[:self.BOARD_PAGE_SIZE],
+            )
+            pipeline_columns.append({
+                'value': value,
+                'label': label,
+                'leads': leads,
+                'shown': len(leads),
+                'total': total,
+                'has_more': total > len(leads),
+            })
+
+        search = self.request.GET.get('q', '').strip()
+        selected_stage = self.request.GET.get('stage', '')
+        if selected_stage not in Lead.Stage.values:
+            selected_stage = ''
         context.update(self.common_context())
         context.update({
             'stages': Lead.Stage.choices,
-            'pipeline_columns': [
-                {'value': value, 'label': label, 'leads': leads_by_stage[value]}
-                for value, label in Lead.Stage.choices
-            ],
-            'selected_stage': self.request.GET.get('stage', ''),
-            'search': self.request.GET.get('q', ''),
+            'pipeline_columns': pipeline_columns,
+            'has_leads': any(totals.values()),
+            'selected_stage': selected_stage,
+            'search': search,
+        })
+        return context
+
+
+class LeadStageListView(TenantWebMixin, ListView):
+    """A focused, server-paginated working list for one pipeline stage."""
+
+    template_name = 'web/lead_stage_list.html'
+    context_object_name = 'leads'
+    paginate_by = 25
+    ORDERING_CHOICES = (
+        ('-last_activity_at', 'Latest activity'),
+        ('last_activity_at', 'Oldest activity'),
+        ('customer_name', 'Customer A–Z'),
+        ('-customer_name', 'Customer Z–A'),
+        ('-quoted_price', 'Highest quote'),
+        ('quoted_price', 'Lowest quote'),
+    )
+
+    def get_stage(self):
+        stage = self.kwargs['stage']
+        if stage not in Lead.Stage.values:
+            raise Http404('Unknown lead stage.')
+        return stage
+
+    @staticmethod
+    def valid_uuid(value):
+        try:
+            return UUID(value)
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+    def get_queryset(self):
+        queryset = self.visible_leads().filter(stage=self.get_stage())
+        search = self.request.GET.get('q', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(customer_name__icontains=search) | Q(phone__icontains=search) | Q(email__icontains=search),
+            )
+
+        source = self.request.GET.get('source', '')
+        if source in Lead.Source.values:
+            queryset = queryset.filter(source=source)
+
+        assigned_user_id = self.valid_uuid(self.request.GET.get('assigned_user'))
+        if self.request.GET.get('assigned_user'):
+            if not assigned_user_id:
+                return queryset.none()
+            if self.is_manager() or assigned_user_id == self.request.user.id:
+                queryset = queryset.filter(assigned_user_id=assigned_user_id)
+            else:
+                return queryset.none()
+
+        product_id = self.valid_uuid(self.request.GET.get('product'))
+        if self.request.GET.get('product'):
+            if not product_id:
+                return queryset.none()
+            queryset = queryset.filter(product_id=product_id)
+
+        ordering = self.request.GET.get('ordering', '-last_activity_at')
+        allowed_ordering = {value for value, _label in self.ORDERING_CHOICES}
+        if ordering not in allowed_ordering:
+            ordering = '-last_activity_at'
+        return queryset.order_by(ordering, '-id')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        stage = self.get_stage()
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        context.update(self.common_context())
+        context.update({
+            'stage': stage,
+            'stage_label': Lead.Stage(stage).label,
+            'search': self.request.GET.get('q', '').strip(),
+            'selected_source': self.request.GET.get('source', ''),
+            'selected_assigned_user': self.request.GET.get('assigned_user', ''),
+            'selected_product': self.request.GET.get('product', ''),
+            'selected_ordering': self.request.GET.get('ordering', '-last_activity_at'),
+            'source_choices': Lead.Source.choices,
+            'ordering_choices': self.ORDERING_CHOICES,
+            'assignees': User.objects.filter(
+                business=self.get_business(), is_active=True,
+            ).order_by('first_name', 'last_name', 'username') if self.is_manager() else [self.request.user],
+            'products': Product.objects.for_business(self.get_business()).filter(is_active=True).order_by('name'),
+            'query_string': query_params.urlencode(),
         })
         return context
 
@@ -334,6 +449,7 @@ class LeadCreateView(TenantWebMixin, FormView):
             content='Lead captured.',
             created_by=self.request.user,
         )
+        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(self.request, f'{lead.customer_name} is now in your pipeline.')
         return redirect('web:lead-detail', pk=lead.pk)
 
@@ -374,6 +490,7 @@ class LeadUpdateView(TenantWebMixin, View):
             if request.user.role == User.Role.SALESPERSON:
                 updated_lead.assigned_user = lead.assigned_user
             updated_lead.save()
+            transaction.on_commit(lambda: invalidate_business_lead_cache(updated_lead.business_id))
             messages.success(request, 'Lead details updated.')
         else:
             messages.error(request, 'Check the lead details and try again.')
@@ -430,6 +547,7 @@ class LeadStageUpdateView(TenantWebMixin, View):
                 transaction.on_commit(
                     lambda: schedule_follow_up.delay(str(locked_lead.business_id), str(locked_lead.id), rule.key),
                 )
+            transaction.on_commit(lambda: invalidate_business_lead_cache(locked_lead.business_id))
 
         if wants_json:
             return JsonResponse({
@@ -460,6 +578,7 @@ class LeadNeedsTimeView(TenantWebMixin, View):
             transaction.on_commit(
                 lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), DELAYED_FOLLOWUP.key),
             )
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(request, 'Follow-up set for seven days from now.')
         return redirect('web:lead-detail', pk=lead.pk)
 
@@ -476,6 +595,7 @@ class LeadActivityCreateView(TenantWebMixin, View):
             activity.save()
             lead.last_activity_at = timezone.now()
             lead.save(update_fields=('last_activity_at', 'updated_at'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
             messages.success(request, 'Activity added to the timeline.')
         else:
             messages.error(request, 'Add a short note about what happened before saving.')
@@ -603,6 +723,7 @@ class ProductListView(OwnerRequiredMixin, TemplateView):
             product = form.save(commit=False)
             product.business = self.get_business()
             product.save()
+            transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
             messages.success(request, f'{product.name} was added.')
             return redirect('web:product-list')
         context = self.get_context_data()
@@ -619,7 +740,8 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
         return User.objects.filter(business=self.get_business())
 
     def form_valid(self, form):
-        form.save()
+        member = form.save()
+        transaction.on_commit(lambda: invalidate_business_lead_cache(member.business_id))
         messages.success(self.request, 'Team member updated.')
         return redirect('web:team-list')
 
@@ -656,7 +778,8 @@ class ProductEditView(OwnerRequiredMixin, UpdateView):
         return Product.objects.for_business(self.get_business())
 
     def form_valid(self, form):
-        form.save()
+        product = form.save()
+        transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
         messages.success(self.request, 'Product updated.')
         return redirect('web:product-list')
 
@@ -673,6 +796,7 @@ class ProductDeleteView(OwnerRequiredMixin, View):
         product = get_object_or_404(Product.objects.for_business(self.get_business()), pk=pk)
         product.is_active = False
         product.save(update_fields=('is_active',))
+        transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
         messages.success(request, 'Product deactivated. Existing lead history is preserved.')
         return redirect('web:product-list')
 

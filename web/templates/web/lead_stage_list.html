@@ -1,0 +1,53 @@
+{% extends 'web/base.html' %}
+{% block title %}{{ stage_label }} leads · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading lead-stage-heading">
+    <div>
+      <a class="back-link" href="{% url 'web:lead-list' %}"><span aria-hidden="true">←</span> Back to pipeline</a>
+      <p class="eyebrow">PIPELINE STAGE</p>
+      <h1>{{ stage_label }} leads</h1>
+      <p>{{ page_obj.paginator.count }} lead{{ page_obj.paginator.count|pluralize }} in this stage. Search and work the list without loading the whole board.</p>
+    </div>
+    <a class="button button-dark" href="{% url 'web:lead-create' %}">Quick add <span aria-hidden="true">+</span></a>
+  </section>
+
+  <form class="lead-filter lead-stage-filter" method="get">
+    <label class="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input name="q" value="{{ search }}" placeholder="Search name, phone, or email"></label>
+    <label class="select-field"><span class="sr-only">Filter source</span><select name="source"><option value="">All sources</option>{% for value, label in source_choices %}<option value="{{ value }}" {% if selected_source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label class="select-field"><span class="sr-only">Filter owner</span><select name="assigned_user"><option value="">All owners</option>{% for member in assignees %}<option value="{{ member.pk }}" {% if selected_assigned_user == member.pk|stringformat:'s' %}selected{% endif %}>{{ member.get_full_name|default:member.username }}</option>{% endfor %}</select></label>
+    <label class="select-field"><span class="sr-only">Filter service</span><select name="product"><option value="">All services</option>{% for product in products %}<option value="{{ product.pk }}" {% if selected_product == product.pk|stringformat:'s' %}selected{% endif %}>{{ product.name }}</option>{% endfor %}</select></label>
+    <label class="select-field"><span class="sr-only">Sort leads</span><select name="ordering">{% for value, label in ordering_choices %}<option value="{{ value }}" {% if selected_ordering == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button class="button button-muted" type="submit">Apply</button>
+    {% if search or selected_source or selected_assigned_user or selected_product or selected_ordering != '-last_activity_at' %}<a class="clear-filter" href="{% url 'web:lead-stage-list' stage %}">Clear</a>{% endif %}
+  </form>
+
+  <section class="panel lead-stage-table-panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Lead</th><th>Service</th><th>Source</th><th>Quote</th><th>Owner</th><th>Last activity</th></tr></thead>
+        <tbody>
+          {% for lead in leads %}
+            <tr>
+              <td><a class="table-lead-link" href="{% url 'web:lead-detail' lead.pk %}"><strong>{{ lead.customer_name }}</strong><small>{{ lead.phone }}{% if lead.email %} · {{ lead.email }}{% endif %}</small></a></td>
+              <td>{{ lead.product|default:'Service to be confirmed' }}</td>
+              <td>{{ lead.get_source_display }}</td>
+              <td>{% if lead.quoted_price %}Rs {{ lead.quoted_price|floatformat:0 }}{% else %}—{% endif %}</td>
+              <td>{{ lead.assigned_user.get_full_name|default:lead.assigned_user.username }}</td>
+              <td><time>{{ lead.last_activity_at|timesince }} ago</time></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="6" class="stage-list-empty">No leads match these filters.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pagination" aria-label="Lead pages">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}{% if query_string %}&amp;{{ query_string }}{% endif %}">← Previous</a>{% else %}<span>← Previous</span>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}{% if query_string %}&amp;{{ query_string }}{% endif %}">Next →</a>{% else %}<span>Next →</span>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

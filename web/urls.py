@@ -3,7 +3,7 @@ from django.urls import path
 
 from .views import (
     BusinessSettingsView, DashboardView, LandingView, LeadActivityCreateView, LeadCreateView,
-    LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageUpdateView,
+    LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageListView, LeadStageUpdateView,
     LeadUpdateView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ReportsView,
     SignupView, TaskCompleteView, TaskListView, TaskRescheduleView, TeamDeleteView, TeamEditView,
     TeamListView,
@@ -20,6 +20,7 @@ urlpatterns = [
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('leads/', LeadListView.as_view(), name='lead-list'),
     path('leads/new/', LeadCreateView.as_view(), name='lead-create'),
+    path('leads/stage/<str:stage>/', LeadStageListView.as_view(), name='lead-stage-list'),
     path('leads/<uuid:pk>/', LeadDetailView.as_view(), name='lead-detail'),
     path('leads/<uuid:pk>/edit/', LeadUpdateView.as_view(), name='lead-update'),
     path('leads/<uuid:pk>/stage/', LeadStageUpdateView.as_view(), name='lead-stage'),
