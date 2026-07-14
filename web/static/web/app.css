@@ -532,6 +532,34 @@ a.nav-item:hover, .nav-item:hover, .nav-item.active {
     padding-bottom: 1.25rem;
 }
 
+.dashboard-date-line {
+    align-items: center;
+    display: flex;
+    gap: .65rem;
+}
+
+.dashboard-live-clock {
+    align-items: center;
+    border-left: 1px solid var(--line-dark);
+    color: var(--ink-soft);
+    display: inline-flex;
+    font-feature-settings: "tnum" 1;
+    font-size: .62rem;
+    font-variant-numeric: tabular-nums;
+    gap: .36rem;
+    letter-spacing: .07em;
+    padding-left: .65rem;
+    white-space: nowrap;
+}
+
+.dashboard-live-clock::before {
+    background: #6f8f70;
+    border-radius: 50%;
+    content: "";
+    height: 6px;
+    width: 6px;
+}
+
 .attention-board {
     background: var(--ink);
     border-radius: 1rem;
