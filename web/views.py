@@ -662,21 +662,32 @@ class LeadFollowUpCreateView(TenantWebMixin, View):
 class TaskListView(TenantWebMixin, ListView):
     template_name = 'web/task_list.html'
     context_object_name = 'tasks'
-    paginate_by = None
+    paginate_by = 10
 
     def get_queryset(self):
         queryset = self.visible_tasks().filter(status__in=(FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE))
         status_filter = self.request.GET.get('status')
         if status_filter in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
             queryset = queryset.filter(status=status_filter)
-        return queryset.order_by('due_at')
+        return queryset.order_by('due_at', 'id')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        task_counts = self.visible_tasks().filter(
+            status__in=(FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE),
+        ).aggregate(
+            total=Count('id'),
+            pending=Count('id', filter=Q(status=FollowUpTask.Status.PENDING)),
+            overdue=Count('id', filter=Q(status=FollowUpTask.Status.OVERDUE)),
+        )
         context.update(self.common_context())
         context.update({
             'selected_status': self.request.GET.get('status', ''),
             'today': timezone.localdate(timezone.now(), timezone=ZoneInfo(self.get_business().timezone)),
+            'query_string': query_params.urlencode(),
+            'task_counts': task_counts,
         })
         return context
 
