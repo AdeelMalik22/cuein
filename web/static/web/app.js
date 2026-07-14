@@ -58,7 +58,9 @@
     column.dataset.nextOffset = String(shown);
 
     var count = column.querySelector("[data-column-total]");
-    if (count) count.textContent = String(total);
+    if (count) {
+      count.textContent = count.dataset.countFormat === "parenthesized" ? "(" + total + ")" : String(total);
+    }
     var summary = column.querySelector("[data-column-summary]");
     if (summary) summary.textContent = "Showing " + shown + " of " + total;
     var loadMore = column.querySelector("[data-load-more]");
@@ -98,6 +100,12 @@
     return "Rs " + new Intl.NumberFormat("en-PK", { maximumFractionDigits: 0 }).format(number);
   }
 
+  function leadInitials(name) {
+    return String(name || "L").trim().split(/\s+/).slice(0, 2).map(function (part) {
+      return part.charAt(0);
+    }).join("").toUpperCase() || "L";
+  }
+
   function leadCardFromPayload(lead) {
     var card = document.createElement("article");
     card.className = "lead-card";
@@ -111,19 +119,22 @@
     link.className = "lead-card-link";
     link.href = lead.detail_url;
 
-    var top = document.createElement("div");
-    top.className = "lead-card-top";
+    var primary = document.createElement("div");
+    primary.className = "lead-card-primary";
+    var avatar = document.createElement("span");
+    avatar.className = "lead-card-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = leadInitials(lead.customer_name);
+    var copy = document.createElement("span");
+    copy.className = "lead-card-copy";
     var name = document.createElement("strong");
     name.textContent = lead.customer_name;
-    var arrow = document.createElement("span");
-    arrow.className = "lead-card-arrow";
-    arrow.setAttribute("aria-hidden", "true");
-    arrow.textContent = "↗";
-    top.appendChild(name);
-    top.appendChild(arrow);
-
-    var product = document.createElement("p");
+    var product = document.createElement("small");
     product.textContent = lead.product_name || "Service to be confirmed";
+    copy.appendChild(name);
+    copy.appendChild(product);
+    primary.appendChild(avatar);
+    primary.appendChild(copy);
 
     var meta = document.createElement("div");
     meta.className = "lead-card-meta";
@@ -135,8 +146,7 @@
     meta.appendChild(price);
     meta.appendChild(activity);
 
-    link.appendChild(top);
-    link.appendChild(product);
+    link.appendChild(primary);
     link.appendChild(meta);
     card.appendChild(link);
     return card;
@@ -168,6 +178,7 @@
       offset: String(columnNumber(column, "shown"))
     });
     if (board.dataset.search) params.set("search", board.dataset.search);
+    if (board.dataset.assignedUser) params.set("assigned_user", board.dataset.assignedUser);
     var separator = apiUrl.indexOf("?") === -1 ? "?" : "&";
     setLoadMoreBusy(button, true);
 

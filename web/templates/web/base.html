@@ -8,7 +8,7 @@
   <title>{% block title %}Cuein{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>
     (function () {
       try {
@@ -22,7 +22,7 @@
   <script src="{% static 'web/app.js' %}" defer></script>
   {% block extra_head %}{% endblock %}
 </head>
-<body class="app-body">
+<body class="app-body {% block body_class %}{% endblock %}">
   <div class="app-shell">
     <aside id="workspace-sidebar" class="sidebar" aria-label="Workspace navigation">
       <a class="brand" href="{% if is_salesperson %}{% url 'web:lead-list' %}{% else %}{% url 'web:dashboard' %}{% endif %}" aria-label="Cuein home">
@@ -74,6 +74,7 @@
     </aside>
 
     <main class="main-content">
+      {% block workspace_topbar %}
       <header class="topbar">
         <div class="workspace-identity">
           <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-controls="workspace-sidebar" aria-expanded="true" aria-label="Close navigation">
@@ -88,6 +89,7 @@
           <span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ request.user.email|default:request.user.username }}</small></span>
         </div>
       </header>
+      {% endblock %}
       {% if messages %}
         <div class="flash-stack" aria-live="polite">
           {% for message in messages %}<div class="flash-message {{ message.tags }}">{{ message }}</div>{% endfor %}

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -283,18 +284,28 @@ class LeadListView(TenantWebMixin, TemplateView):
     template_name = 'web/lead_list.html'
     BOARD_PAGE_SIZE = 10
 
-    def get_board_queryset(self):
+    def visible_board_leads(self):
         # The board needs only card fields. Keeping this separate from
         # visible_leads() avoids loading assignees and contact data for every
         # record before the seven columns are rendered.
-        queryset = Lead.objects.for_business(self.get_business()).select_related('product')
+        queryset = Lead.objects.for_business(self.get_business())
         if self.request.user.role == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
+        return queryset
+
+    def get_board_queryset(self):
+        queryset = self.visible_board_leads().select_related('product')
 
         stage = self.request.GET.get('stage', '')
         search = self.request.GET.get('q', '').strip()
+        assigned_user = self.request.GET.get('assigned_user', '')
         if stage in Lead.Stage.values:
             queryset = queryset.filter(stage=stage)
+        if assigned_user:
+            try:
+                queryset = queryset.filter(assigned_user_id=UUID(assigned_user))
+            except (TypeError, ValueError, AttributeError):
+                return queryset.none()
         if search:
             queryset = queryset.filter(
                 Q(customer_name__icontains=search) | Q(phone__icontains=search) | Q(email__icontains=search),
@@ -318,6 +329,8 @@ class LeadListView(TenantWebMixin, TemplateView):
             leads = list(
                 queryset.filter(stage=value).order_by('-last_activity_at', '-id').only(*card_fields)[:self.BOARD_PAGE_SIZE],
             )
+            for lead in leads:
+                lead.initials = ''.join(part[0] for part in lead.customer_name.split()[:2]).upper() or 'L'
             pipeline_columns.append({
                 'value': value,
                 'label': label,
@@ -331,13 +344,41 @@ class LeadListView(TenantWebMixin, TemplateView):
         selected_stage = self.request.GET.get('stage', '')
         if selected_stage not in Lead.Stage.values:
             selected_stage = ''
+        selected_assigned_user = self.request.GET.get('assigned_user', '')
+        summary = self.visible_board_leads().aggregate(
+            total=Count('id'),
+            new=Count('id', filter=Q(stage=Lead.Stage.NEW_INQUIRY)),
+            won=Count('id', filter=Q(stage=Lead.Stage.WON)),
+            lost=Count('id', filter=Q(stage=Lead.Stage.LOST)),
+            value=Sum('quoted_price'),
+            created_this_month=Count('id', filter=Q(created_at__gte=timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0))),
+        )
+        closed = summary['won'] + summary['lost']
+        board_filter_params = {}
+        if search:
+            board_filter_params['q'] = search
+        if selected_assigned_user:
+            board_filter_params['assigned_user'] = selected_assigned_user
         context.update(self.common_context())
         context.update({
             'stages': Lead.Stage.choices,
             'pipeline_columns': pipeline_columns,
             'has_leads': any(totals.values()),
             'selected_stage': selected_stage,
+            'selected_assigned_user': selected_assigned_user,
             'search': search,
+            'assignees': User.objects.filter(
+                business=self.get_business(), is_active=True,
+            ).order_by('first_name', 'last_name', 'username') if self.is_manager() else [self.request.user],
+            'board_filter_query': urlencode(board_filter_params),
+            'lead_summary': {
+                'total': summary['total'],
+                'new': summary['new'],
+                'won': summary['won'],
+                'conversion_rate': round(summary['won'] * 100 / closed, 1) if closed else 0,
+                'value': summary['value'] or 0,
+                'created_this_month': summary['created_this_month'],
+            },
         })
         return context
 

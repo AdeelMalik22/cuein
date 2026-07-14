@@ -1,5 +1,28 @@
 {% extends 'web/base.html' %}
+{% block body_class %}leads-redesign{% endblock %}
 {% block title %}{% if is_salesperson %}My leads{% else %}Leads{% endif %} · Cuein{% endblock %}
+
+{% block workspace_topbar %}
+  <header class="topbar">
+    <div class="workspace-identity">
+      <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-controls="workspace-sidebar" aria-expanded="true" aria-label="Close navigation">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+      </button>
+      <span class="mobile-wordmark">cuein</span>
+      <span class="workspace-name">{{ business.name }}</span>
+      <span class="workspace-role">{{ request.user.get_role_display }}</span>
+    </div>
+    <div class="topbar-user">
+      <span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span>
+      <span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ request.user.email|default:request.user.username }}</small></span>
+    </div>
+    <div class="lead-page-identity" hidden>
+      <h1>{% if is_salesperson %}My leads{% else %}Leads{% endif %}</h1>
+      <p>Manage and track all leads in your pipeline</p>
+    </div>
+  </header>
+{% endblock %}
+
 {% block content %}
   <section class="page-heading lead-board-heading">
     <div><p class="eyebrow">{% if is_salesperson %}YOUR PIPELINE{% else %}SHARED PIPELINE{% endif %}</p><h1>{% if is_salesperson %}My leads{% else %}Leads{% endif %}</h1><p>{% if is_salesperson %}Capture the call, move the card, set the next step.{% else %}Every opportunity in {{ business.name }}, in one shared view.{% endif %}</p></div>
@@ -9,42 +32,52 @@
   <form class="lead-filter" method="get">
     <label class="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input name="q" value="{{ search }}" placeholder="Search name, phone, or email"></label>
     <label class="select-field"><span class="sr-only">Filter stage</span><select name="stage"><option value="">All stages</option>{% for value, label in stages %}<option value="{{ value }}" {% if selected_stage == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    {% if selected_assigned_user %}<input type="hidden" name="assigned_user" value="{{ selected_assigned_user }}">{% endif %}
     <button class="button button-muted" type="submit">Filter</button>
-    {% if search or selected_stage %}<a class="clear-filter" href="{% url 'web:lead-list' %}">Clear</a>{% endif %}
+    {% if search or selected_stage or selected_assigned_user %}<a class="clear-filter" href="{% url 'web:lead-list' %}">Clear</a>{% endif %}
   </form>
 
-  {% if has_leads %}
-    <p class="board-help"><span class="desktop-help">Drag a lead to move it forward. </span>Open a lead to log a call, set a reminder, or record why it was lost.</p>
-    <div class="kanban-scroll" data-kanban data-kanban-api-url="{% url 'lead-kanban' %}" data-search="{{ search }}">
-      <section class="kanban-board" aria-label="Lead pipeline">
-        {% for column in pipeline_columns %}
-          <article class="kanban-column {% if column.value == 'lost' %}terminal-column{% endif %}" data-stage="{{ column.value }}" data-requires-reason="{% if column.value == 'lost' %}true{% else %}false{% endif %}" data-total="{{ column.total }}" data-shown="{{ column.shown }}" data-next-offset="{{ column.shown }}">
-            <header><span class="stage-number">0{{ forloop.counter }}</span><h2>{{ column.label }}</h2><strong data-column-total>{{ column.total }}</strong></header>
-            <div class="kanban-dropzone">
-              {% for lead in column.leads %}
-                <article class="lead-card" draggable="true" data-lead-id="{{ lead.pk }}" data-stage="{{ lead.stage }}" data-transition-url="{% url 'web:lead-stage' lead.pk %}" data-detail-url="{% url 'web:lead-detail' lead.pk %}">
-                  <a href="{% url 'web:lead-detail' lead.pk %}" class="lead-card-link">
-                    <div class="lead-card-top"><strong>{{ lead.customer_name }}</strong><span class="lead-card-arrow" aria-hidden="true">↗</span></div>
-                    <p>{{ lead.product|default:'Service to be confirmed' }}</p>
-                    <div class="lead-card-meta"><span>{% if lead.quoted_price %}Rs {{ lead.quoted_price|floatformat:0 }}{% else %}No quote yet{% endif %}</span><time>{{ lead.last_activity_at|timesince }} ago</time></div>
-                  </a>
-                </article>
-              {% empty %}<p class="column-empty">No leads here</p>{% endfor %}
-            </div>
-            <footer class="kanban-column-footer">
-              <span data-column-summary>Showing {{ column.shown }} of {{ column.total }}</span>
-              <div class="kanban-column-actions">
-                <button class="kanban-load-more" type="button" data-load-more {% if not column.has_more %}hidden{% endif %}>Load more</button>
-                <a class="kanban-view-all" href="{% url 'web:lead-stage-list' column.value %}{% if search %}?q={{ search|urlencode }}{% endif %}">View all</a>
+  <section class="lead-workspace lead-board-workspace">
+
+    {% if has_leads %}
+      <div class="kanban-scroll lead-kanban-scroll" data-kanban data-kanban-api-url="{% url 'lead-kanban' %}" data-search="{{ search }}" data-assigned-user="{{ selected_assigned_user }}">
+        <section class="kanban-board" aria-label="Lead pipeline">
+          {% for column in pipeline_columns %}
+            <article class="kanban-column kanban-stage-{{ forloop.counter }}" data-stage="{{ column.value }}" data-requires-reason="{% if column.value == 'lost' %}true{% else %}false{% endif %}" data-total="{{ column.total }}" data-shown="{{ column.shown }}" data-next-offset="{{ column.shown }}">
+              <header><h2>{{ column.label }} <span data-column-total data-count-format="parenthesized">({{ column.total }})</span></h2><button type="button" class="kanban-column-menu" aria-label="{{ column.label }} options">•••</button></header>
+              <div class="kanban-dropzone">
+                {% for lead in column.leads %}
+                  <article class="lead-card" draggable="true" data-lead-id="{{ lead.pk }}" data-stage="{{ lead.stage }}" data-transition-url="{% url 'web:lead-stage' lead.pk %}" data-detail-url="{% url 'web:lead-detail' lead.pk %}">
+                    <a href="{% url 'web:lead-detail' lead.pk %}" class="lead-card-link">
+                      <div class="lead-card-primary"><span class="lead-card-avatar" aria-hidden="true">{{ lead.initials }}</span><span class="lead-card-copy"><strong>{{ lead.customer_name }}</strong><small>{{ lead.product|default:'Service to be confirmed' }}</small></span></div>
+                      <div class="lead-card-meta"><span>{% if lead.quoted_price %}Rs {{ lead.quoted_price|floatformat:0 }}{% else %}No quote yet{% endif %}</span><time>{{ lead.last_activity_at|timesince }} ago</time></div>
+                    </a>
+                  </article>
+                {% empty %}<p class="column-empty">No leads here</p>{% endfor %}
               </div>
-            </footer>
-          </article>
-        {% endfor %}
-      </section>
-    </div>
-  {% elif search or selected_stage %}
-    <section class="board-empty-state"><p class="eyebrow">NO MATCHES</p><h2>No leads match this board filter.</h2><p>Try a different search or stage, or clear the filter to return to the full pipeline.</p><a class="button button-muted" href="{% url 'web:lead-list' %}">Clear filters</a></section>
-  {% else %}
-    <section class="board-empty-state"><p class="eyebrow">START THE PIPELINE</p><h2>Your next inquiry has a home here.</h2><p>Add a customer’s name, phone number, and source in seconds. You can fill in the rest after the call.</p><a class="button button-accent" href="{% url 'web:lead-create' %}">Add your first lead <span aria-hidden="true">→</span></a></section>
-  {% endif %}
+              <footer class="kanban-column-footer">
+                <span data-column-summary>Showing {{ column.shown }} of {{ column.total }}</span>
+                <div class="kanban-column-actions">
+                  <button class="kanban-load-more" type="button" data-load-more {% if not column.has_more %}hidden{% endif %}>Load more</button>
+                  <a class="kanban-view-all" href="{% url 'web:lead-stage-list' column.value %}{% if board_filter_query %}?{{ board_filter_query }}{% endif %}">View all</a>
+                </div>
+              </footer>
+            </article>
+          {% endfor %}
+        </section>
+      </div>
+    {% elif search or selected_stage or selected_assigned_user %}
+      <section class="board-empty-state"><p class="eyebrow">NO MATCHES</p><h2>No leads match these filters.</h2><p>Try another search or clear the filters to return to the complete pipeline.</p><a class="button button-muted" href="{% url 'web:lead-list' %}">Clear filters</a></section>
+    {% else %}
+      <section class="board-empty-state"><p class="eyebrow">START THE PIPELINE</p><h2>Your next inquiry has a home here.</h2><p>Add a customer’s name, phone number, and source in seconds.</p><a class="button button-accent" href="{% url 'web:lead-create' %}">Add your first lead <span aria-hidden="true">→</span></a></section>
+    {% endif %}
+
+    <section class="lead-summary-strip" aria-label="Pipeline summary">
+      <article class="lead-summary-metric metric-total"><span class="lead-summary-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"></circle><path d="M5 20a7 7 0 0 1 14 0M19 8a3 3 0 0 1 0 6M21 20a5 5 0 0 0-3-4.58"></path></svg></span><span><small>Total Leads</small><strong>{{ lead_summary.total }}</strong><em>↑ {{ lead_summary.created_this_month }} this month</em></span></article>
+      <article class="lead-summary-metric metric-new"><span class="lead-summary-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0-9-9"></path><path d="M3 12h9V3M12 12l6 6"></path></svg></span><span><small>New Leads</small><strong>{{ lead_summary.new }}</strong><em>↑ Current stage count</em></span></article>
+      <article class="lead-summary-metric metric-won"><span class="lead-summary-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path><path d="M3 4h18v16H3z"></path></svg></span><span><small>Won Leads</small><strong>{{ lead_summary.won }}</strong><em>↑ Closed successfully</em></span></article>
+      <article class="lead-summary-metric metric-rate"><span class="lead-summary-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19 19 5M7 7h.01M17 17h.01"></path><circle cx="7" cy="7" r="3"></circle><circle cx="17" cy="17" r="3"></circle></svg></span><span><small>Conversion Rate</small><strong>{{ lead_summary.conversion_rate }}%</strong><em>↑ Won of closed leads</em></span></article>
+      <article class="lead-summary-metric metric-value"><span class="lead-summary-icon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M15 9.5c-.4-.9-1.4-1.5-3-1.5-1.8 0-3 .8-3 2s1.2 1.8 3 2 3 .8 3 2-1.2 2-3 2c-1.6 0-2.6-.6-3-1.5M12 6v12"></path></svg></span><span><small>Total Value</small><strong>Rs {{ lead_summary.value|floatformat:0 }}</strong><em>↑ Quoted pipeline value</em></span></article>
+    </section>
+  </section>
 {% endblock %}

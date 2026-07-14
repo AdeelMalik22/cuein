@@ -118,6 +118,11 @@ class LeadBoardPaginationTests(TestCase):
         self.assertContains(response, 'Showing 10 of 12')
         self.assertContains(response, 'data-load-more')
         self.assertContains(response, 'View all')
+        self.assertContains(response, 'SHARED PIPELINE')
+        self.assertContains(response, 'Quick add')
+        self.assertContains(response, 'class="lead-filter"')
+        self.assertContains(response, 'lead-summary-strip')
+        self.assertContains(response, 'kanban-stage-1')
         self.assertNotContains(response, 'Board lead 10')
 
     def test_stage_list_is_paginated_and_applies_server_side_filters(self):
