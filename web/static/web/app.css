@@ -3767,9 +3767,21 @@ body.leads-redesign .lead-mode.is-active {
 }
 
 body.leads-redesign .lead-kanban-scroll {
-    --kanban-column-height: clamp(460px, calc(100vh - 366px), 570px);
-    margin-bottom: 1.3rem;
-    padding-bottom: .65rem;
+    --kanban-column-height: clamp(420px, calc(100vh - 420px), 520px);
+    margin-bottom: 1.5rem;
+    padding-bottom: .85rem;
+    scrollbar-color: #c6cfdb transparent;
+    scrollbar-width: thin;
+}
+
+body.leads-redesign .lead-kanban-scroll::-webkit-scrollbar {
+    height: 8px;
+}
+
+body.leads-redesign .lead-kanban-scroll::-webkit-scrollbar-thumb {
+    background: #c6cfdb;
+    border: 2px solid var(--canvas);
+    border-radius: 99px;
 }
 
 body.leads-redesign .kanban-board {
@@ -3810,6 +3822,10 @@ body.leads-redesign .kanban-column > header h2 {
     font-size: .8rem;
     font-weight: 700;
     letter-spacing: -.018em;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 body.leads-redesign .kanban-column > header h2 span {
@@ -3833,7 +3849,20 @@ body.leads-redesign .kanban-column-menu {
 body.leads-redesign .kanban-dropzone {
     background: #fcfdff;
     gap: .58rem;
+    overscroll-behavior: contain;
     padding: .65rem .58rem;
+    scrollbar-color: #aeb9c8 transparent;
+    scrollbar-width: thin;
+}
+
+body.leads-redesign .kanban-dropzone::-webkit-scrollbar {
+    width: 7px;
+}
+
+body.leads-redesign .kanban-dropzone::-webkit-scrollbar-thumb {
+    background: #aeb9c8;
+    border: 2px solid #fcfdff;
+    border-radius: 99px;
 }
 
 body.leads-redesign .kanban-column.is-drop-target .kanban-dropzone {
@@ -3852,6 +3881,11 @@ body.leads-redesign .lead-card {
 body.leads-redesign .lead-card:hover {
     box-shadow: 0 6px 14px rgba(37, 55, 84, .1);
     transform: translateY(-1px);
+}
+
+body.leads-redesign .lead-card:focus-within {
+    border-color: #9dbcf2;
+    box-shadow: 0 0 0 3px rgba(108, 162, 255, .16);
 }
 
 body.leads-redesign .lead-card-link {
@@ -3939,10 +3973,14 @@ body.leads-redesign .lead-card-meta time {
 body.leads-redesign .kanban-column-footer {
     background: #fbfcfe;
     border-top: 1px solid #edf0f5;
+    box-shadow: 0 -5px 12px rgba(37, 55, 84, .025);
     color: #667387;
+    flex: 0 0 auto;
     font-size: .63rem;
     min-height: 47px;
     padding: .64rem .76rem;
+    position: relative;
+    z-index: 1;
 }
 
 body.leads-redesign .kanban-column-actions {

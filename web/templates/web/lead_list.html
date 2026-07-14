@@ -3,24 +3,7 @@
 {% block title %}{% if is_salesperson %}My leads{% else %}Leads{% endif %} · Cuein{% endblock %}
 
 {% block workspace_topbar %}
-  <header class="topbar">
-    <div class="workspace-identity">
-      <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-controls="workspace-sidebar" aria-expanded="true" aria-label="Close navigation">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
-      </button>
-      <span class="mobile-wordmark">cuein</span>
-      <span class="workspace-name">{{ business.name }}</span>
-      <span class="workspace-role">{{ request.user.get_role_display }}</span>
-    </div>
-    <div class="topbar-user">
-      <span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span>
-      <span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ request.user.email|default:request.user.username }}</small></span>
-    </div>
-    <div class="lead-page-identity" hidden>
-      <h1>{% if is_salesperson %}My leads{% else %}Leads{% endif %}</h1>
-      <p>Manage and track all leads in your pipeline</p>
-    </div>
-  </header>
+  {{ block.super }}
 {% endblock %}
 
 {% block content %}
