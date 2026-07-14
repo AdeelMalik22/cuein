@@ -64,3 +64,4 @@ class DashboardAnalyticsTests(TestCase):
         self.assertNotIn(Lead.Source.FACEBOOK, source_rows)
         self.assertEqual(response.context['analytics_win_rate'], 100)
         self.assertContains(response, 'See the shape of your pipeline.')
+        self.assertContains(response, 'data-sidebar-toggle')

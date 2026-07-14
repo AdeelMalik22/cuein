@@ -9,13 +9,22 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+  <script>
+    (function () {
+      try {
+        if (window.localStorage.getItem('cuein.sidebarCollapsed') === 'true') {
+          document.documentElement.classList.add('sidebar-is-collapsed');
+        }
+      } catch (error) {}
+    }());
+  </script>
   <link rel="stylesheet" href="{% static 'web/app.css' %}">
   <script src="{% static 'web/app.js' %}" defer></script>
   {% block extra_head %}{% endblock %}
 </head>
 <body class="app-body">
   <div class="app-shell">
-    <aside class="sidebar" aria-label="Workspace navigation">
+    <aside id="workspace-sidebar" class="sidebar" aria-label="Workspace navigation">
       <a class="brand" href="{% if is_salesperson %}{% url 'web:lead-list' %}{% else %}{% url 'web:dashboard' %}{% endif %}" aria-label="Cuein home">
         <span class="brand-mark">c</span><span class="brand-word">cuein</span>
       </a>
@@ -67,6 +76,9 @@
     <main class="main-content">
       <header class="topbar">
         <div class="workspace-identity">
+          <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-controls="workspace-sidebar" aria-expanded="true" aria-label="Close navigation">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+          </button>
           <span class="mobile-wordmark">cuein</span>
           <span class="workspace-name">{{ business.name }}</span>
           <span class="workspace-role">{{ request.user.get_role_display }}</span>

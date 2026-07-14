@@ -124,8 +124,42 @@
     syncLostReason();
   }
 
+  function setUpSidebarToggle() {
+    var toggle = document.querySelector("[data-sidebar-toggle]");
+    var sidebar = document.getElementById("workspace-sidebar");
+    if (!toggle || !sidebar) return;
+
+    var storageKey = "cuein.sidebarCollapsed";
+    var desktopQuery = window.matchMedia("(min-width: 681px)");
+
+    function syncSidebar() {
+      var isCollapsed = document.documentElement.classList.contains("sidebar-is-collapsed");
+      var isHidden = desktopQuery.matches && isCollapsed;
+      toggle.setAttribute("aria-expanded", String(!isCollapsed));
+      toggle.setAttribute("aria-label", isCollapsed ? "Open navigation" : "Close navigation");
+      sidebar.setAttribute("aria-hidden", String(isHidden));
+      sidebar.inert = isHidden;
+    }
+
+    toggle.addEventListener("click", function () {
+      var isCollapsed = document.documentElement.classList.toggle("sidebar-is-collapsed");
+      try {
+        window.localStorage.setItem(storageKey, String(isCollapsed));
+      } catch (error) {}
+      syncSidebar();
+    });
+
+    if (desktopQuery.addEventListener) {
+      desktopQuery.addEventListener("change", syncSidebar);
+    } else {
+      desktopQuery.addListener(syncSidebar);
+    }
+    syncSidebar();
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     setUpKanban();
     setUpStageForm();
+    setUpSidebarToggle();
   });
 }());
