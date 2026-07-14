@@ -167,9 +167,13 @@ class DashboardView(TenantWebMixin, TemplateView):
 
         stage_totals = {
             row['stage']: row['total']
-            for row in active_leads.values('stage').annotate(total=Count('id'))
+            for row in leads.values('stage').annotate(total=Count('id'))
         }
-        active_count = active_leads.count()
+        active_count = sum(
+            stage_totals.get(value, 0)
+            for value, _label in Lead.Stage.choices
+            if value not in (Lead.Stage.WON, Lead.Stage.LOST)
+        )
         stage_rows = [
             {
                 'value': value,
@@ -180,6 +184,47 @@ class DashboardView(TenantWebMixin, TemplateView):
             for value, label in Lead.Stage.choices
             if value not in (Lead.Stage.WON, Lead.Stage.LOST)
         ]
+
+        # Keep the dashboard charts compact and directly actionable: the
+        # complete stage mix shows where opportunities sit, while source
+        # conversion shows which channels produce customers rather than just
+        # inquiries. Both are built from the same tenant-scoped queryset used
+        # everywhere else on this page.
+        short_stage_labels = {
+            Lead.Stage.NEW_INQUIRY: 'New',
+            Lead.Stage.CONTACTED: 'Contacted',
+            Lead.Stage.SITE_VISIT: 'Visit',
+            Lead.Stage.QUOTATION_SENT: 'Quote',
+            Lead.Stage.NEGOTIATION: 'Negotiating',
+            Lead.Stage.WON: 'Won',
+            Lead.Stage.LOST: 'Lost',
+        }
+        largest_stage_total = max(stage_totals.values(), default=0)
+        analytics_stage_rows = []
+        for value, label in Lead.Stage.choices:
+            total = stage_totals.get(value, 0)
+            analytics_stage_rows.append({
+                'value': value,
+                'label': label,
+                'short_label': short_stage_labels[value],
+                'total': total,
+                'height': max(round(total * 100 / largest_stage_total), 10) if total else 0,
+            })
+
+        source_labels = dict(Lead.Source.choices)
+        analytics_source_rows = list(
+            leads.values('source').annotate(
+                total=Count('id'),
+                won=Count('id', filter=Q(stage=Lead.Stage.WON)),
+            ).order_by('-total', 'source')[:5],
+        )
+        for row in analytics_source_rows:
+            row['label'] = source_labels.get(row['source'], row['source'])
+            row['conversion'] = round(row['won'] * 100 / row['total']) if row['total'] else 0
+            row['width'] = row['conversion']
+
+        closed_count = stage_totals.get(Lead.Stage.WON, 0) + stage_totals.get(Lead.Stage.LOST, 0)
+        win_rate = round(stage_totals.get(Lead.Stage.WON, 0) * 100 / closed_count) if closed_count else 0
 
         team_attention = []
         for teammate in User.objects.filter(
@@ -223,6 +268,10 @@ class DashboardView(TenantWebMixin, TemplateView):
             'quiet_quotes': quiet_quotes[:4],
             'recent_leads': leads.order_by('-updated_at')[:6],
             'stage_rows': stage_rows,
+            'analytics_stage_rows': analytics_stage_rows,
+            'analytics_source_rows': analytics_source_rows,
+            'analytics_closed_count': closed_count,
+            'analytics_win_rate': win_rate,
             'team_attention': team_attention,
             'team_attention_overflow': team_attention_overflow,
         })
