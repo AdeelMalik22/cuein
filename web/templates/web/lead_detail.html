@@ -1,4 +1,22 @@
 {% extends 'web/base.html' %}
+<style>
+  /* Scoped to the stage-change form only — safe even if .field is reused elsewhere */
+  .stage-change-form .lost-reason-field,
+  .stage-change-form .stage-note-field {
+    flex: 1 1 220px;
+  }
+
+  .stage-change-form .lost-reason-field input,
+  .stage-change-form .lost-reason-field textarea,
+  .stage-change-form .stage-note-field input,
+  .stage-change-form .stage-note-field textarea {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    resize: vertical;
+  }
+</style>
 {% block title %}{{ lead.customer_name }} · Cuein{% endblock %}
 {% block content %}
   <a class="back-link detail-back-link" href="{% url 'web:lead-list' %}"><span aria-hidden="true">←</span> Back to pipeline</a>
