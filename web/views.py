@@ -133,6 +133,7 @@ class OnboardingView(OwnerRequiredMixin, TemplateView):
 
 class DashboardView(TenantWebMixin, TemplateView):
     template_name = 'web/dashboard.html'
+    TEAM_ATTENTION_LIMIT = 5
 
     def dispatch(self, request, *args, **kwargs):
         # A salesperson's command centre is their personal pipeline. Sending
@@ -197,6 +198,13 @@ class DashboardView(TenantWebMixin, TemplateView):
                 'needs_attention': bool(member_stalled or member_due),
             })
 
+        # Priority order: most stalled first, then most due, then everyone
+        # else alphabetically (already the default order coming in).
+        team_attention.sort(key=lambda row: (-row['stalled_count'], -row['due_count']))
+        team_attention_total = len(team_attention)
+        team_attention_overflow = max(team_attention_total - self.TEAM_ATTENTION_LIMIT, 0)
+        team_attention = team_attention[:self.TEAM_ATTENTION_LIMIT]
+
         needs_action_count = active_leads.exclude(
             follow_up_tasks__status__in=(FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE),
         ).distinct().count()
@@ -216,9 +224,9 @@ class DashboardView(TenantWebMixin, TemplateView):
             'recent_leads': leads.order_by('-updated_at')[:6],
             'stage_rows': stage_rows,
             'team_attention': team_attention,
+            'team_attention_overflow': team_attention_overflow,
         })
         return context
-
 
 class LeadListView(TenantWebMixin, ListView):
     template_name = 'web/lead_list.html'
