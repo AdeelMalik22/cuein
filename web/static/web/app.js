@@ -305,6 +305,39 @@
     syncLostReason();
   }
 
+  function setUpLiveClocks() {
+    document.querySelectorAll("[data-live-clock]").forEach(function (clock) {
+      var options = {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true
+      };
+      var timeZone = clock.dataset.timeZone;
+      if (timeZone) options.timeZone = timeZone;
+
+      var formatter;
+      try {
+        formatter = new Intl.DateTimeFormat("en-PK", options);
+      } catch (error) {
+        delete options.timeZone;
+        formatter = new Intl.DateTimeFormat("en-PK", options);
+      }
+
+      function updateClock() {
+        var now = new Date();
+        clock.dateTime = now.toISOString();
+        clock.textContent = formatter.format(now);
+      }
+
+      updateClock();
+      window.setTimeout(function () {
+        updateClock();
+        window.setInterval(updateClock, 1000);
+      }, 1000 - (Date.now() % 1000));
+    });
+  }
+
   function setUpSidebarToggle() {
     var toggle = document.querySelector("[data-sidebar-toggle]");
     var sidebar = document.getElementById("workspace-sidebar");
@@ -341,6 +374,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     setUpKanban();
     setUpStageForm();
+    setUpLiveClocks();
     setUpSidebarToggle();
   });
 }());

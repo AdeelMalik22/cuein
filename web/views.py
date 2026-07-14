@@ -259,6 +259,7 @@ class DashboardView(TenantWebMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'today': today,
+            'dashboard_now': timezone.localtime(now, timezone=ZoneInfo(business.timezone)),
             'due_today_count': open_tasks.filter(due_at__date=today).count(),
             'overdue_count': overdue_tasks.count(),
             'active_leads_count': active_count,
