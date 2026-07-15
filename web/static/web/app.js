@@ -403,6 +403,48 @@
     });
   }
 
+  function setUpSalespersonReportLoadMore() {
+    function bindReport(report) {
+      report.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-salesperson-page-action]");
+        if (!action || !report.contains(action) || action.dataset.loading === "true") return;
+
+        event.preventDefault();
+        var url = action.href;
+        action.dataset.loading = "true";
+        action.classList.add("is-loading");
+        action.setAttribute("aria-busy", "true");
+
+        fetch(url, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          credentials: "same-origin"
+        }).then(function (response) {
+          if (!response.ok) throw new Error("salesperson report failed");
+          return response.text();
+        }).then(function (html) {
+          var documentFragment = new DOMParser().parseFromString(html, "text/html");
+          var updatedReport = documentFragment.querySelector("[data-salesperson-report]");
+          if (!updatedReport) throw new Error("invalid salesperson report");
+
+          report.replaceWith(updatedReport);
+          bindReport(updatedReport);
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, "", url);
+          }
+          var updatedAction = updatedReport.querySelector("[data-salesperson-page-action]");
+          if (updatedAction) updatedAction.focus();
+        }).catch(function () {
+          delete action.dataset.loading;
+          action.classList.remove("is-loading");
+          action.removeAttribute("aria-busy");
+          notice("Cuein could not load more salespeople. Please try again.");
+        });
+      });
+    }
+
+    document.querySelectorAll("[data-salesperson-report]").forEach(bindReport);
+  }
+
   // Delegate this at script-load time instead of wiring each button during
   // page setup. A toast can then always be dismissed even if another optional
   // enhancement on the page fails to initialize.
@@ -450,6 +492,44 @@
         updateClock();
         window.setInterval(updateClock, 1000);
       }, 1000 - (Date.now() % 1000));
+    });
+  }
+
+  function setUpDashboardGreetings() {
+    document.querySelectorAll("[data-dashboard-greeting]").forEach(function (greeting) {
+      var options = { hour: "numeric", hourCycle: "h23" };
+      var timeZone = greeting.dataset.timeZone;
+      var userName = greeting.dataset.userName || "there";
+      if (timeZone) options.timeZone = timeZone;
+
+      var formatter;
+      try {
+        formatter = new Intl.DateTimeFormat("en-PK", options);
+      } catch (error) {
+        delete options.timeZone;
+        formatter = new Intl.DateTimeFormat("en-PK", options);
+      }
+
+      function greetingForHour(hour) {
+        if (hour < 12) return "Good morning";
+        if (hour < 17) return "Good afternoon";
+        return "Good evening";
+      }
+
+      function updateGreeting() {
+        var hourPart = formatter.formatToParts(new Date()).filter(function (part) {
+          return part.type === "hour";
+        })[0];
+        var hour = Number(hourPart && hourPart.value);
+        if (Number.isNaN(hour)) return;
+        greeting.textContent = greetingForHour(hour) + ", " + userName + ".";
+      }
+
+      updateGreeting();
+      window.setTimeout(function () {
+        updateGreeting();
+        window.setInterval(updateGreeting, 60000);
+      }, 60000 - (Date.now() % 60000));
     });
   }
 
@@ -506,7 +586,9 @@
     setUpStageForm();
     setUpAssigneeDropdowns();
     setUpLeadTrendTooltips();
+    setUpSalespersonReportLoadMore();
     setUpLiveClocks();
+    setUpDashboardGreetings();
     setUpSidebarToggle();
   });
 }());

@@ -2543,6 +2543,41 @@ input::placeholder, textarea::placeholder {
     background: var(--ink);
 }
 
+.report-list-footer {
+    align-items: center;
+    border-top: 1px solid var(--line);
+    display: flex;
+    gap: .85rem;
+    justify-content: space-between;
+    margin-top: .15rem;
+    padding-top: .85rem;
+}
+
+.report-list-footer > span {
+    color: var(--muted);
+    font-size: .7rem;
+}
+
+.report-list-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    justify-content: flex-end;
+}
+
+.report-load-more-button {
+    flex: 0 0 auto;
+    font-size: .73rem;
+    min-height: 36px;
+    padding: .55rem .8rem;
+}
+
+.report-load-more-button.is-loading {
+    cursor: progress;
+    opacity: .68;
+    pointer-events: none;
+}
+
 .lost-reasons-panel {
     grid-column: 1 / -1;
 }
@@ -4070,6 +4105,15 @@ input::placeholder, textarea::placeholder {
 
     .chart-row {
         grid-template-columns: minmax(80px, 1fr) minmax(60px, 1fr) 35px;
+    }
+
+    .report-list-footer {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .report-list-actions {
+        justify-content: flex-start;
     }
 
     .loss-row {

@@ -3,7 +3,7 @@
 {% block content %}
     <section class="page-heading dashboard-heading">
         <div><p class="eyebrow dashboard-date-line"><span>{{ today|date:'l, F j' }}</span><time class="dashboard-live-clock" data-live-clock data-time-zone="{{ business.timezone }}" datetime="{{ dashboard_now|date:'c' }}" title="Current time in {{ business.timezone }}">{{ dashboard_now|date:'g:i:s A' }}</time></p>
-            <h1>Good morning, {{ request.user.first_name|default:request.user.username }}.</h1>
+            <h1 data-dashboard-greeting data-time-zone="{{ business.timezone }}" data-user-name="{{ request.user.first_name|default:request.user.username }}">{{ dashboard_greeting }}, {{ request.user.first_name|default:request.user.username }}.</h1>
             <p>One calm view of every follow-up that needs attention.</p></div>
         <a class="button button-dark" href="{% url 'web:lead-create' %}">Add a lead <span
                 aria-hidden="true">+</span></a>

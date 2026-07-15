@@ -305,6 +305,14 @@ class DashboardView(TenantWebMixin, TemplateView):
     LEAD_TREND_CHART_TOP = 18
     LEAD_TREND_CHART_BOTTOM = 136
 
+    @staticmethod
+    def greeting_for_hour(hour):
+        if hour < 12:
+            return 'Good morning'
+        if hour < 17:
+            return 'Good afternoon'
+        return 'Good evening'
+
     def dispatch(self, request, *args, **kwargs):
         # A salesperson's command centre is their personal pipeline. Sending
         # them there keeps the default route focused rather than a cut-down
@@ -321,7 +329,9 @@ class DashboardView(TenantWebMixin, TemplateView):
         business = self.get_business()
         now = timezone.now()
         business_timezone = ZoneInfo(business.timezone)
-        today = timezone.localdate(now, timezone=business_timezone)
+        dashboard_now = timezone.localtime(now, timezone=business_timezone)
+        today = dashboard_now.date()
+        dashboard_greeting = self.greeting_for_hour(dashboard_now.hour)
         leads = self.visible_leads()
         active_leads = leads.exclude(stage__in=(Lead.Stage.WON, Lead.Stage.LOST))
         tasks = self.visible_tasks()
@@ -473,7 +483,8 @@ class DashboardView(TenantWebMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'today': today,
-            'dashboard_now': timezone.localtime(now, timezone=business_timezone),
+            'dashboard_now': dashboard_now,
+            'dashboard_greeting': dashboard_greeting,
             'due_today_count': open_tasks.filter(due_at__date=today).count(),
             'overdue_count': overdue_tasks.count(),
             'active_leads_count': active_count,
@@ -1152,6 +1163,7 @@ class BusinessSettingsView(OwnerRequiredMixin, FormView):
 
 class ReportsView(ManagerRequiredMixin, TemplateView):
     template_name = 'web/reports.html'
+    SALESPERSON_PAGE_SIZE = 10
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -1169,10 +1181,12 @@ class ReportsView(ManagerRequiredMixin, TemplateView):
             row['width'] = row['conversion']
 
         salesperson_rows = list(
-            leads.values('assigned_user__username', 'assigned_user__first_name', 'assigned_user__last_name').annotate(
+            leads.exclude(assigned_user__isnull=True).values(
+                'assigned_user__username', 'assigned_user__first_name', 'assigned_user__last_name',
+            ).annotate(
                 total=Count('id'),
                 won=Count('id', filter=Q(stage=Lead.Stage.WON)),
-            ).order_by('-total'),
+            ),
         )
         for row in salesperson_rows:
             row['label'] = ' '.join(
@@ -1180,6 +1194,33 @@ class ReportsView(ManagerRequiredMixin, TemplateView):
             ) or row['assigned_user__username']
             row['conversion'] = round(row['won'] * 100 / row['total']) if row['total'] else 0
             row['width'] = row['conversion']
+            row['conversion_ratio'] = row['won'] / row['total'] if row['total'] else 0
+
+        # Rank by actual conversion percentage rather than raw lead volume.
+        # This keeps the most effective salespeople at the top, even when the
+        # team is large, and gives the card a clear, manageable default size.
+        salesperson_rows.sort(key=lambda row: (
+            -row['conversion_ratio'], -row['won'], -row['total'], row['label'].casefold(),
+        ))
+        salesperson_total_count = len(salesperson_rows)
+        try:
+            requested_salesperson_limit = int(
+                self.request.GET.get('salespeople_limit', self.SALESPERSON_PAGE_SIZE),
+            )
+        except (TypeError, ValueError):
+            requested_salesperson_limit = self.SALESPERSON_PAGE_SIZE
+        salesperson_visible_count = min(
+            max(self.SALESPERSON_PAGE_SIZE, requested_salesperson_limit),
+            salesperson_total_count,
+        )
+        salesperson_more_count = min(
+            self.SALESPERSON_PAGE_SIZE,
+            max(salesperson_total_count - salesperson_visible_count, 0),
+        )
+        salesperson_next_limit = salesperson_visible_count + salesperson_more_count
+        salesperson_has_more = bool(salesperson_more_count)
+        salesperson_can_collapse = salesperson_visible_count > self.SALESPERSON_PAGE_SIZE
+        salesperson_rows = salesperson_rows[:salesperson_visible_count]
 
         product_rows = list(
             leads.filter(stage=Lead.Stage.WON, closed_at__isnull=False).values('product__name').annotate(
@@ -1214,6 +1255,12 @@ class ReportsView(ManagerRequiredMixin, TemplateView):
         context.update({
             'source_rows': source_rows,
             'salesperson_rows': salesperson_rows,
+            'salesperson_total_count': salesperson_total_count,
+            'salesperson_visible_count': salesperson_visible_count,
+            'salesperson_more_count': salesperson_more_count,
+            'salesperson_next_limit': salesperson_next_limit,
+            'salesperson_has_more': salesperson_has_more,
+            'salesperson_can_collapse': salesperson_can_collapse,
             'product_rows': product_rows,
             'lost_reasons': lost_reasons,
             'average_days': round(closed_duration.total_seconds() / 86400, 1) if closed_duration else None,
