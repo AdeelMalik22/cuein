@@ -13,6 +13,7 @@ The application has two first-class interfaces:
 - Email-confirmed business registration: no `Business` or owner `User` is created until the owner enters the expiring six-digit email code.
 - A seven-stage lead pipeline: New inquiry, Contacted, Site visit, Quotation sent, Negotiation, Won, and Lost.
 - Lead quick-add, search/filtering, assignment, editing, activity timeline, and validated lost reasons.
+- Profile editing with optional profile photos, plus a photo-and-name assignee picker with a fallback avatar.
 - A Kanban board with desktop drag-and-drop, internally scrollable columns, and role-scoped visibility.
 - Follow-up tasks with pending, overdue, done, and cancelled states; complete and reschedule workflows.
 - Celery-backed follow-up scheduling plus overdue-task and stale-lead sweeps.
@@ -32,6 +33,12 @@ One running application serves independent businesses. Each `Business` is a tena
 - Cross-tenant object lookups return `404` rather than exposing another tenant’s data or object existence.
 
 The `User.business` and `User.role` fields remain temporarily for a safe production rollout. Running `migrate` performs an idempotent membership backfill; operators can also run `python3 manage.py backfill_memberships` to verify or repeat it safely.
+
+## Lead assignment
+
+Owners and managers can choose an assignee while creating or editing a lead. The picker shows each eligible teammate's profile photo (or the default avatar), name, and email/username; it also works when JavaScript is unavailable.
+
+Only active members of the **currently selected workspace** are eligible. If a person is not shown, first make them an active team member of that business; Cuein deliberately never assigns a lead across business boundaries. Salespeople create leads assigned to themselves and cannot reassign leads.
 
 ## API overview
 
@@ -144,11 +151,12 @@ Never hand-write a Django migration. After model changes, generate it with:
 python3.10 manage.py makemigrations
 ```
 
-See `PRD-FollowUpCRM.md` for the product requirements, `plan.md` for delivery status, and `CLAUDE.md` for the repository working guide.
+See `PRD-FollowUpCRM.md` for the product requirements, `plan.md` for delivery status, `CLAUDE.md` for the repository working guide, and `understanding.md` for the multi-business architecture and request flows.
 
 ## Progress so far
 
 - The tenant-safe lead and follow-up workflow is usable end-to-end through both the web workspace and REST API.
 - Automation services, dashboards, reports, and role-scoped management views are implemented.
+- Workspace switching, owner-created businesses, business-scoped JWTs, profile photos, and reliable visual lead assignment are implemented.
 - Dashboard analytics and the Smith LLC demo dataset make it possible to inspect realistic pipeline and follow-up states locally.
 - Current hardening priorities are broader automated coverage, CI/deployment readiness, and pilot validation of reminder defaults.
