@@ -14,7 +14,7 @@
       {% for group, options, index in widget.optgroups %}
         {% for option in options %}
           <label class="assignee-dropdown-option" data-assignee-option data-assignee-name="{{ option.display_name }}" data-assignee-detail="{{ option.secondary_label }}"{% if option.avatar_url %} data-assignee-avatar="{{ option.avatar_url }}"{% endif %}>
-            {{ option.tag }}
+            {% include option.template_name with widget=option %}
             <span class="assignee-dropdown-option-content">
               <span class="profile-avatar assignee-avatar" aria-hidden="true">
                 {% if option.avatar_url %}<img src="{{ option.avatar_url }}" alt="">{% else %}<img src="{% static 'web/images/default-profile-avatar.svg' %}" alt="">{% endif %}

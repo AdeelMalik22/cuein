@@ -54,9 +54,9 @@ def invalidate_business_lead_cache(business_id):
         return
 
 
-def lead_api_cache_key(*, business_id, user, action, query_params):
+def lead_api_cache_key(*, business_id, user, role, action, query_params):
     """Build a compact key with tenant, role scope, endpoint, and filters."""
-    scope = str(user.id) if user.role == user.Role.SALESPERSON else 'business'
+    scope = str(user.id) if role == user.Role.SALESPERSON else 'business'
     query_items = []
     for name in _CACHEABLE_QUERY_PARAMS:
         for value in query_params.getlist(name):

@@ -2,7 +2,7 @@
 
 **Companion to:** `PRD-FollowUpCRM.md`  
 **Status:** Active implementation — core MVP workflows are built; hardening and pilot readiness remain.
-**Last updated:** July 14, 2026
+**Last updated:** July 15, 2026
 
 ## 1. Delivery Goal and MVP Boundary
 
@@ -38,7 +38,7 @@ Explicitly defer configurable stages, configurable automation rules, WhatsApp/SM
 | Frontend | Django templates + shared CSS + progressive JavaScript | Keeps the workflow fast to build, mobile-responsive, and close to Django’s auth/forms. |
 | API auth | Django sessions for the web workspace; `djangorestframework-simplejwt` for the API | The workspace uses normal Django authentication while integrations use JWT. |
 | Tenant model | Shared schema, `business_id` on every tenant-owned table | Appropriate operational complexity for SMB SaaS. |
-| User model | Custom Django `User`, created before the first migration | Avoids the high-cost migration of changing `AUTH_USER_MODEL` later. A user belongs to one business in v1. |
+| User model | Global custom Django `User` plus a `Membership` join model | One login can access several businesses; role and active status live on each membership. `User.business`/`User.role` remain a temporary migration bridge, not authorization state. |
 | Notifications | In-app task feed only | Keeps MVP focused; email/WhatsApp becomes an adapter, not a prerequisite. |
 
 Use `followups` as the Django app name rather than `tasks`, which is easily confused with Celery task modules and Python task concepts.
@@ -58,11 +58,14 @@ Browser  →  Django web views/templates
 ### Tenant scoping
 
 - `Business` is the tenant root. All tenant-owned models carry a non-null `business` FK.
-- The authenticated `request.user.business` is the only tenant source for HTTP requests. Never accept `business_id` from a client payload.
-- Each tenant-owned ViewSet explicitly scopes `get_queryset()` with `request.user.business`; `perform_create()` assigns that business server-side. Keep this rule visible in every new ViewSet until a shared mixin provides the same clarity without hiding tenant ownership.
+- A global `User` reaches a business through an active `Membership`; the membership holds the workspace-specific role and status.
+- Browser requests resolve the active business from `request.session['active_business_id']`, then validate the selected business against the signed-in user's active memberships. `TenantWebMixin` exposes the resulting business and role to web views.
+- API access tokens are bound to exactly one business. The authentication layer re-validates the token's membership on every request before exposing the active business and role.
+- Never accept a client-controlled `business_id` as the tenant source for a normal request. A business ID supplied to the workspace switch or token endpoint must be re-validated against the user's memberships before it is saved or signed.
+- Each tenant-owned ViewSet scopes `get_queryset()` with the resolved active business; `perform_create()` assigns that business server-side. Keep this rule visible in every new ViewSet until a shared mixin provides the same clarity without hiding tenant ownership.
 - Object lookups must use that scoped queryset, producing 404 rather than exposing cross-tenant object existence.
 - Do **not** use a request/thread-local "current tenant" manager. It is fragile in admin, scripts, async work, and tests. Use explicit `.for_business(business)` querysets and consistently scoped ViewSet methods.
-- Serializers validate that every related object (product, assignee, lead) belongs to the authenticated user's business.
+- Serializers validate that every related object (product, assignee, lead) belongs to the resolved active business; new assignees must have an active membership there.
 - Celery tasks accept primitive IDs, then fetch with both primary key and `business_id`. Periodic tasks iterate businesses explicitly.
 - The Django admin must scope tenant-owned querysets and foreign-key choices to the admin user's business, or be restricted to a superuser-only internal console.
 
@@ -76,7 +79,7 @@ Browser  →  Django web views/templates
 | Manage team/settings | yes | optional | no |
 | View reports/dashboard | all | all | personal queue only |
 
-Keep role checks in named DRF permission classes and queryset filters, not only hidden frontend controls.
+Keep role checks in named DRF permission classes and queryset filters, not only hidden frontend controls. Roles are membership-scoped; `User.role` must not authorize an active-workspace action.
 
 ## 4. Data Model and Invariants
 
@@ -85,7 +88,8 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 | Model | Important fields | Constraints / notes |
 | --- | --- | --- |
 | `Business` | name, industry, is_active, created_at | Tenant root. |
-| `User` | business, role, phone, email, is_active | Custom `AbstractUser`; one business per user in v1. |
+| `User` | username, password, email, phone, profile_picture, is_active | Global custom `AbstractUser` identity. Legacy `business` and `role` fields remain only as a safe rollout bridge. |
+| `Membership` | user, business, role, is_active, joined_at | Unique `(user, business)` link. A user can have different roles in different workspaces. |
 | `Product` | business, name, description, is_active | Unique name per business. |
 | `Lead` | business, customer_name, phone, email, source, product, stage, quoted_price, assigned_user, lost_reason, created_at, updated_at, last_activity_at, closed_at | `lost_reason` required for Lost; `closed_at` set for Won/Lost. `last_activity_at` is denormalized for efficient stale checks. |
 | `Activity` | business, lead, type, content, metadata, created_by, created_at | Append-only. `metadata` stores structured stage data such as `{from, to}`. |
@@ -100,6 +104,7 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 - `FollowUpTask`: `(business, assigned_user, due_at, status)`, `(business, lead, status)`.
 - `Activity`: `(business, lead, created_at)`.
 - `Product`: unique `(business, name)`.
+- `Membership`: unique `(user, business)`, plus indexes for `(user, is_active)` and `(business, is_active)`.
 - Partial unique constraint for automated tasks: one non-terminal task per `(business, lead, rule_key)`. If the database/version makes the exact conditional constraint awkward, enforce with a transaction and document it; PostgreSQL partial uniqueness is preferred.
 - Check constraints for non-negative quoted price and a valid `closed_at`/terminal stage relationship where practical. Keep the conditional Lost reason validation in the serializer/model `clean()` as it is text-based.
 
@@ -135,7 +140,7 @@ Use `/api/v1/`; paginate lists; return ISO-8601 UTC timestamps. List endpoints a
 
 | Area | Endpoints |
 | --- | --- |
-| Auth | `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `GET /me` |
+| Auth | `POST /auth/signup`, `POST /auth/verify-email`, `POST /auth/token`, `POST /auth/token/refresh`, `GET /me` |
 | Team | `GET/POST /users`, `PATCH /users/{id}` (owner/manager scope) |
 | Products | `GET/POST /products`, `PATCH /products/{id}` |
 | Leads | `GET/POST /leads`, `GET/PATCH /leads/{id}`, `POST /leads/{id}/transition`, `POST /leads/{id}/needs-time`, `GET /leads/{id}/timeline` |
@@ -145,6 +150,8 @@ Use `/api/v1/`; paginate lists; return ISO-8601 UTC timestamps. List endpoints a
 | Reports | `GET /reports/conversion-by-source`, `.../by-salesperson`, `.../time-to-close`, `.../lost-reasons` |
 
 Define request/response examples in an OpenAPI schema and generate or validate the frontend API client from it. Error responses should be field-addressable (`{ "lost_reason": ["Required when stage is lost."] }`) and use consistent 401/403/404 semantics.
+
+For a user with several active memberships, `POST /auth/token` requires a `business_id`. The server validates that membership before placing the business identifier in the signed refresh/access token; normal API requests never carry a mutable workspace header.
 
 ## 7. Frontend Scope
 
@@ -163,15 +170,24 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 
 ### Phase 0 — Project foundation — substantially complete
 
-- Implemented: PostgreSQL configuration, custom `User`, `Business`, JWT API auth, session-authenticated web views, role permissions, and tenant isolation test fixtures.
+- Implemented: PostgreSQL configuration, custom `User`, `Business`, membership-scoped JWT/session authentication, role permissions, and tenant isolation test fixtures.
 - Remaining: Docker Compose, health/readiness endpoints, `.env.example`, structured logging, and CI for formatting, migration checks, and tests.
 
 **Exit:** a user can authenticate; every tenant-scoped list/detail request is demonstrably isolated; CI, readiness checks, and deployment configuration are in place.
 
+### Phase 0.5 — Multi-business workspaces — complete
+
+- `Membership` now links one global identity to one or more businesses, carrying a role and active status per workspace.
+- Web sessions resolve a validated active workspace and the sidebar can switch workspaces. Invalid or inactive selections are rejected; a switch always starts at the selected business dashboard.
+- JWTs are business-scoped and re-check the membership when used. A person with multiple memberships must choose a business when obtaining a token.
+- Owners can create and immediately enter another business from the workspace switcher. Existing `User.business` and `User.role` values are preserved as a compatibility bridge, and migrations/backfill create legacy memberships idempotently.
+
+**Exit:** a shared user can see only the selected business's data, holds the correct role in each business, and cannot switch to a business without a membership.
+
 ### Phase 1 — Lead workflow walking skeleton — complete
 
 - Product, Lead, Activity, assignment, and stage-transition APIs are implemented with tenant validation.
-- The web workspace includes quick-add, lead detail/editing, activity logging, follow-up creation, and a responsive Kanban board with desktop drag-and-drop.
+- The web workspace includes quick-add, lead detail/editing, activity logging, follow-up creation, and a responsive Kanban board with desktop drag-and-drop. Owner/manager assignee choices use profile photos with a fallback avatar and include native radio controls, so selection works with or without JavaScript.
 - Dashboard/task views surface active leads without open next actions.
 
 **Exit:** a salesperson can create and progress a lead end-to-end, see a complete timeline, and cannot access a colleague’s lead; manager can reassign it.
@@ -206,6 +222,8 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 | --- | --- |
 | P0 | Cross-tenant reads, writes, related-object assignment, reports, admin scope, and Celery task scoping. |
 | P0 | Role visibility and reassignment rules. |
+| P0 | Multi-membership workspace switching, rejected workspace selection, business-scoped JWT issuance, and access-token membership revalidation. |
+| P0 | Assignment accepts only an active member of the current business; rendered assignee choices include a real submitted form control. |
 | P0 | Transition validation, Lost reason, one timeline event per transition, transaction rollback behavior. |
 | P0 | Automation idempotency, retries, timezone boundaries, stale/overdue sweeps. |
 | P1 | Dashboard/report aggregate correctness and pagination/filter behavior. |
@@ -217,6 +235,7 @@ Use factories that always require an explicit business. Do not create unscoped t
 ## 10. Operations, Privacy, and Release Readiness
 
 - Secrets come only from environment/secret management; never commit `.env` files or JWT keys.
+- Deploy membership changes with `manage.py migrate`; `manage.py backfill_memberships` is an idempotent safety check for legacy users.
 - Back up PostgreSQL daily and test a restore before pilot. Redis is disposable broker state, not the system of record.
 - Enable TLS, secure cookies where applicable, allowed-host/CORS configuration, rate limits on login, and production error monitoring.
 - Log request ID, user ID, business ID, and action outcome without storing notes/phone numbers in logs. Treat lead data as customer personal data.
@@ -227,7 +246,7 @@ Use factories that always require an explicit business. Do not create unscoped t
 
 1. Whether v1.1 needs email, WhatsApp, or SMS—validate which channel pilot users actually act on.
 2. Per-business configurable follow-up rules and pipeline stages.
-3. Multi-business memberships for consultants/franchise owners; current v1 intentionally supports one business per user.
+3. Cross-business reporting, combined dashboards, and data transfers. Multiple business access is implemented, but each workspace remains isolated by design.
 4. Industry-specific fields, warranty durations, and lead sources.
 5. Retention/deletion policy and regional compliance requirements before broad commercial launch.
 
@@ -238,4 +257,6 @@ Use factories that always require an explicit business. Do not create unscoped t
 - Follow-up services and Celery entry points exist for quote, delayed, warranty, stale, and overdue workflows.
 - The dashboard now combines daily attention metrics with pipeline-stage and source-conversion analytics.
 - A collapsible, scrollable desktop navigation and responsive mobile navigation are implemented.
+- A user can hold multiple business memberships, switch the validated active workspace, and receive a business-scoped JWT; owners can create another business from the switcher.
+- Profile photos and fallback-avatar assignment controls are available in the web workspace.
 - `Smith LLC` has a reusable 2,000-record demo dataset for realistic dashboard, leads, and follow-up testing.

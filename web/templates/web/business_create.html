@@ -1,0 +1,45 @@
+{% extends 'web/base.html' %}
+{% block title %}Add a business · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading business-create-heading">
+    <div>
+      <p class="eyebrow">NEW WORKSPACE</p>
+      <h1>Add a new business</h1>
+      <p>Create a separate, private workspace for another business you own or manage.</p>
+    </div>
+  </section>
+
+  <section class="business-create-layout">
+    <article class="panel business-create-form-panel">
+      <div class="business-create-form-heading">
+        <span class="business-create-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 21V5.5c0-.83.67-1.5 1.5-1.5h7c.83 0 1.5.67 1.5 1.5V21M2 21h20M8 8h2M8 12h2M14 8h2M14 12h2M10 21v-4h4v4"></path></svg>
+        </span>
+        <div><p class="eyebrow">BUSINESS DETAILS</p><h2>Your next workspace</h2></div>
+      </div>
+      <p class="panel-intro">You will be added as its owner and switched into it as soon as it is created.</p>
+      <form method="post" class="stacked-form">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        {% for field in form %}
+          <label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        {% endfor %}
+        <div class="form-actions">
+          <a class="button button-muted" href="{% url 'web:dashboard' %}">Cancel</a>
+          <button class="button button-dark" type="submit">Create business <span aria-hidden="true">→</span></button>
+        </div>
+      </form>
+    </article>
+
+    <aside class="business-create-preview">
+      <p class="eyebrow">WHAT HAPPENS NEXT</p>
+      <h2>A clean workspace, from the start.</h2>
+      <p>Your new business gets its own leads, services, follow-ups, reports, and team. Nothing from your current workspace is shared automatically.</p>
+      <ol class="business-create-steps">
+        <li><span>1</span><div><strong>Business is created</strong><small>Its details and local timezone are saved.</small></div></li>
+        <li><span>2</span><div><strong>You become the owner</strong><small>Your role is scoped only to this new workspace.</small></div></li>
+        <li><span>3</span><div><strong>You start on its overview</strong><small>Add your team and services whenever you are ready.</small></div></li>
+      </ol>
+    </aside>
+  </section>
+{% endblock %}

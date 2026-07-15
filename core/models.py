@@ -86,7 +86,13 @@ class TenantScopedModel(models.Model):
 
 
 class User(AbstractUser):
-    """An authenticated team member belonging to exactly one business in v1."""
+    """A person's global login identity.
+
+    ``business`` and ``role`` are retained temporarily as a legacy bridge for
+    existing installations.  New authorization decisions must use
+    :class:`Membership`, where both the business and role are scoped to the
+    workspace being used.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     class Role(models.TextChoices):
@@ -113,6 +119,30 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.get_username()
+
+
+class Membership(models.Model):
+    """A person's access and role within one business workspace."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='memberships')
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name='memberships')
+    role = models.CharField(max_length=16, choices=User.Role.choices, default=User.Role.SALESPERSON)
+    is_active = models.BooleanField(default=True)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=('user', 'business'), name='unique_user_membership_per_business'),
+        ]
+        indexes = [
+            models.Index(fields=('user', 'is_active')),
+            models.Index(fields=('business', 'is_active')),
+        ]
+        ordering = ('joined_at', 'id')
+
+    def __str__(self):
+        return f'{self.user} in {self.business} ({self.get_role_display()})'
 
 
 class PendingRegistration(models.Model):

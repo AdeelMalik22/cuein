@@ -11,7 +11,7 @@ from django.db import IntegrityError, transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import Business, PendingRegistration, User
+from .models import Business, Membership, PendingRegistration, User
 
 
 VERIFICATION_CODE_LENGTH = 6
@@ -119,6 +119,12 @@ def activate_pending_registration(registration: PendingRegistration, code: str) 
                     email_verification_sent_at=registration.verification_sent_at,
                 )
                 user.save()
+                Membership.objects.create(
+                    user=user,
+                    business=business,
+                    role=User.Role.OWNER,
+                    is_active=True,
+                )
                 registration.delete()
         if failure_message:
             raise EmailVerificationError(failure_message)

@@ -6,7 +6,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
-from core.models import Business, PendingRegistration, User
+from core.models import Business, Membership, PendingRegistration, User
+from core.tenancy import users_for_business
 from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product
 
@@ -24,6 +25,10 @@ class AvatarRadioSelect(forms.RadioSelect):
             account = getattr(self, 'empty_choice_user', None)
 
         option['attrs']['class'] = 'assignee-dropdown-input'
+        # The custom widget supplies the clickable label and visible option
+        # content itself.  Django's stock radio option template would add a
+        # second label around the input, which is invalid nested markup.
+        option['wrap_label'] = False
         option['is_empty_choice'] = is_empty_choice
         option['avatar_url'] = ''
         option['display_name'] = str(label)
@@ -173,10 +178,25 @@ class EmailVerificationCodeForm(forms.Form):
 
 class TeamUserForm(forms.ModelForm):
     password = forms.CharField(required=False, widget=forms.PasswordInput)
+    role = forms.ChoiceField(choices=User.Role.choices)
+    is_active = forms.BooleanField(required=False, initial=True)
 
     class Meta:
         model = User
-        fields = ('username', 'first_name', 'last_name', 'email', 'phone', 'role', 'is_active', 'password')
+        fields = ('username', 'first_name', 'last_name', 'email', 'phone', 'password')
+
+    def __init__(self, *args, business=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.business = business or getattr(self.instance, 'business', None)
+        self.membership = None
+        if self.instance.pk:
+            self.membership = Membership.objects.filter(
+                user=self.instance,
+                business=business,
+            ).first()
+            if self.membership:
+                self.fields['role'].initial = self.membership.role
+                self.fields['is_active'].initial = self.membership.is_active
 
     def clean_password(self):
         value = self.cleaned_data['password']
@@ -186,12 +206,49 @@ class TeamUserForm(forms.ModelForm):
             raise ValidationError('A password is required for a new team member.')
         return value
 
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.membership and self.membership.role == User.Role.OWNER and self.membership.is_active:
+            role = cleaned_data.get('role', self.membership.role)
+            is_active = cleaned_data.get('is_active', self.membership.is_active)
+            if role != User.Role.OWNER or not is_active:
+                owner_count = Membership.objects.filter(
+                    business=self.business,
+                    role=User.Role.OWNER,
+                    is_active=True,
+                    user__is_active=True,
+                ).count()
+                if owner_count == 1:
+                    self.add_error('role', 'A business must keep at least one active owner.')
+        return cleaned_data
+
     def save(self, commit=True):
         user = super().save(commit=False)
         if self.cleaned_data['password']:
             user.set_password(self.cleaned_data['password'])
         if commit:
+            if self.business is None:
+                raise ValueError('A business is required to save a team membership.')
+            if not user.pk:
+                # Keep the legacy link populated only for newly created
+                # accounts during the transition to membership-based access.
+                user.business = self.business
+                user.role = self.cleaned_data['role']
+                user.is_active = True
+            elif self.cleaned_data.get('is_active'):
+                # A legacy single-workspace deactivation set User.is_active.
+                # Re-enabling this membership must make the account usable
+                # again, while deactivation stays scoped to this workspace.
+                user.is_active = True
             user.save()
+            Membership.objects.update_or_create(
+                user=user,
+                business=self.business,
+                defaults={
+                    'role': self.cleaned_data['role'],
+                    'is_active': self.cleaned_data.get('is_active', False),
+                },
+            )
         return user
 
 
@@ -214,20 +271,20 @@ class LeadQuickAddForm(forms.ModelForm):
         model = Lead
         fields = ('customer_name', 'phone', 'source', 'assigned_user')
 
-    def __init__(self, *args, business, user, **kwargs):
+    def __init__(self, *args, business, user, role=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.business = business
         self.user = user
         self.fields['source'].initial = Lead.Source.PHONE_CALL
-        self.fields['assigned_user'].queryset = User.objects.filter(
-            business=business, is_active=True,
-        ).exclude(pk=user.pk).order_by('first_name', 'username')
+        self.fields['assigned_user'].queryset = users_for_business(business).exclude(
+            pk=user.pk,
+        ).order_by('first_name', 'username')
         self.fields['assigned_user'].required = False
         self.fields['assigned_user'].empty_label = 'Assign to me'
         self.fields['assigned_user'].widget = AvatarRadioSelect()
         self.fields['assigned_user'].widget.empty_choice_user = user
         self.fields['assigned_user'].widget.choices = self.fields['assigned_user'].choices
-        if user.role == User.Role.SALESPERSON:
+        if (role or user.role) == User.Role.SALESPERSON:
             self.fields.pop('assigned_user')
 
 
@@ -238,18 +295,18 @@ class LeadDetailsForm(forms.ModelForm):
         model = Lead
         fields = ('customer_name', 'phone', 'email', 'source', 'product', 'quoted_price', 'assigned_user')
 
-    def __init__(self, *args, business, user, **kwargs):
+    def __init__(self, *args, business, user, role=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['product'].queryset = Product.objects.for_business(business).filter(is_active=True).order_by('name')
         self.fields['product'].required = False
-        self.fields['assigned_user'].queryset = User.objects.filter(
-            business=business, is_active=True,
-        ).order_by('first_name', 'username')
+        self.fields['assigned_user'].queryset = users_for_business(business).order_by(
+            'first_name', 'username',
+        )
         self.fields['assigned_user'].required = True
         self.fields['assigned_user'].empty_label = None
         self.fields['assigned_user'].widget = AvatarRadioSelect()
         self.fields['assigned_user'].widget.choices = self.fields['assigned_user'].choices
-        if user.role == User.Role.SALESPERSON:
+        if (role or user.role) == User.Role.SALESPERSON:
             self.fields.pop('assigned_user')
 
 

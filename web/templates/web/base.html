@@ -28,6 +28,37 @@
       <a class="brand" href="{% if is_salesperson %}{% url 'web:lead-list' %}{% else %}{% url 'web:dashboard' %}{% endif %}" aria-label="Cuein home">
         <span class="brand-mark">c</span><span class="brand-word">cuein</span>
       </a>
+      {% if active_membership %}
+        <details class="workspace-switcher">
+          <summary aria-label="Switch workspace">
+            <span class="workspace-switcher-copy">
+              <span class="workspace-switcher-label">Workspace</span>
+              <strong>{{ business.name }}</strong>
+            </span>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></svg>
+          </summary>
+          <div class="workspace-switcher-panel">
+            <p>Switch workspace</p>
+            {% for membership in workspace_memberships %}
+              <form method="post" action="{% url 'web:workspace-switch' %}">
+                {% csrf_token %}
+                <input type="hidden" name="business_id" value="{{ membership.business_id }}">
+                <button type="submit" class="workspace-switcher-option {% if membership.business_id == business.id %}is-active{% endif %}">
+                  <span><strong>{{ membership.business.name }}</strong><small>{{ membership.get_role_display }}</small></span>
+                  {% if membership.business_id == business.id %}<span class="workspace-switcher-check" aria-label="Current workspace">✓</span>{% endif %}
+                </button>
+              </form>
+            {% endfor %}
+            {% if is_owner %}
+              <div class="workspace-switcher-divider" aria-hidden="true"></div>
+              <a class="workspace-switcher-action" href="{% url 'web:business-create' %}">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></svg>
+                <span>Add new business</span>
+              </a>
+            {% endif %}
+          </div>
+        </details>
+      {% endif %}
 
       <nav class="primary-nav" aria-label="Primary navigation">
         {% if is_salesperson %}
@@ -76,7 +107,7 @@
           </button>
           <span class="mobile-wordmark">cuein</span>
           <span class="workspace-name">{{ business.name }}</span>
-          <span class="workspace-role">{{ request.user.get_role_display }}</span>
+          <span class="workspace-role">{{ active_membership.get_role_display }}</span>
         </div>
         <details class="topbar-user-menu">
           <summary class="topbar-user" aria-label="Open account menu">

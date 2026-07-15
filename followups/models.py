@@ -5,6 +5,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.models import TenantScopedModel
+from core.tenancy import belongs_to_business
 from leads.models import Lead
 
 
@@ -41,7 +42,10 @@ class FollowUpTask(TenantScopedModel):
         errors = {}
         if self.business_id and self.lead_id and self.lead.business_id != self.business_id:
             errors['lead'] = 'The lead must belong to the same business.'
-        if self.business_id and self.assigned_user_id and self.assigned_user.business_id != self.business_id:
+        if self.business_id and self.assigned_user_id and not belongs_to_business(
+            self.assigned_user_id,
+            self.business_id,
+        ):
             errors['assigned_user'] = 'The assigned user must belong to the same business.'
         if self.status == self.Status.DONE and not self.completed_at:
             errors['completed_at'] = 'Completed tasks require a completion timestamp.'
@@ -71,7 +75,10 @@ class Notification(TenantScopedModel):
         errors = {}
         if self.business_id and self.task_id and self.task.business_id != self.business_id:
             errors['task'] = 'The task must belong to the same business.'
-        if self.business_id and self.recipient_id and self.recipient.business_id != self.business_id:
+        if self.business_id and self.recipient_id and not belongs_to_business(
+            self.recipient_id,
+            self.business_id,
+        ):
             errors['recipient'] = 'The recipient must belong to the same business.'
         if errors:
             raise ValidationError(errors)

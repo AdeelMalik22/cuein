@@ -2,16 +2,16 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import filters, status, viewsets
-from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from core.authentication import BusinessScopedJWTAuthentication, WorkspaceSessionAuthentication
 from core.models import User
 from core.permissions import IsBusinessManagerOrOwner
+from core.tenancy import active_business, active_role
 
 from .cache import (
     cache_lead_response,
@@ -52,7 +52,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering = ('name',)
 
     def get_queryset(self):
-        return Product.objects.for_business(self.request.user.business)
+        return Product.objects.for_business(active_business(self.request))
 
     def get_permissions(self):
         if self.action in ('create', 'update', 'partial_update', 'destroy'):
@@ -60,7 +60,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         return (IsAuthenticated(),)
 
     def perform_create(self, serializer):
-        product = serializer.save(business=self.request.user.business)
+        product = serializer.save(business=active_business(self.request))
         transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
 
     def perform_update(self, serializer):
@@ -82,7 +82,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     ordering = ('-last_activity_at', '-id')
 
     def get_queryset(self):
-        queryset = Lead.objects.for_business(self.request.user.business)
+        queryset = Lead.objects.for_business(active_business(self.request))
         if self.action == 'kanban':
             queryset = queryset.select_related('product').only(
                 'id', 'customer_name', 'stage', 'quoted_price', 'last_activity_at', 'product_id', 'product__id',
@@ -90,7 +90,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             )
         else:
             queryset = queryset.select_related('product', 'assigned_user')
-        if self.request.user.role == User.Role.SALESPERSON:
+        if active_role(self.request) == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
 
         for field in ('stage', 'source', 'assigned_user', 'product'):
@@ -111,13 +111,13 @@ class LeadViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         assigned_user = serializer.validated_data.get('assigned_user', self.request.user)
-        if self.request.user.role == User.Role.SALESPERSON:
+        if active_role(self.request) == User.Role.SALESPERSON:
             assigned_user = self.request.user
-        lead = serializer.save(business=self.request.user.business, assigned_user=assigned_user)
+        lead = serializer.save(business=active_business(self.request), assigned_user=assigned_user)
         transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
 
     def perform_update(self, serializer):
-        if self.request.user.role == User.Role.SALESPERSON and 'assigned_user' in self.request.data:
+        if active_role(self.request) == User.Role.SALESPERSON and 'assigned_user' in self.request.data:
             raise ValidationError({'assigned_user': 'Salespeople cannot reassign leads.'})
         lead = serializer.save()
         transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
@@ -129,8 +129,9 @@ class LeadViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         cache_key = lead_api_cache_key(
-            business_id=request.user.business_id,
+            business_id=active_business(request).id,
             user=request.user,
+            role=active_role(request),
             action=self.action,
             query_params=request.query_params,
         )
@@ -147,7 +148,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=('get',),
         url_path='kanban',
-        authentication_classes=(SessionAuthentication, JWTAuthentication),
+        authentication_classes=(BusinessScopedJWTAuthentication, WorkspaceSessionAuthentication),
     )
     def kanban(self, request):
         if request.query_params.get('stage') not in Lead.Stage.values:
@@ -171,8 +172,8 @@ class LeadViewSet(viewsets.ModelViewSet):
             # Lock the lead row itself. The normal list queryset joins the
             # nullable product relation, which PostgreSQL correctly refuses
             # to lock with FOR UPDATE.
-            locked_queryset = Lead.objects.for_business(request.user.business)
-            if request.user.role == User.Role.SALESPERSON:
+            locked_queryset = Lead.objects.for_business(active_business(request))
+            if active_role(request) == User.Role.SALESPERSON:
                 locked_queryset = locked_queryset.filter(assigned_user=request.user)
             lead = get_object_or_404(locked_queryset.select_for_update(), pk=pk)
             serializer = LeadTransitionSerializer(data=request.data)

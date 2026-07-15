@@ -21,7 +21,16 @@ from core.email_verification import (
     EmailVerificationError,
     send_email_verification,
 )
-from core.models import PendingRegistration, User
+from core.models import Membership, PendingRegistration, User
+from core.tenancy import (
+    ACTIVE_BUSINESS_SESSION_KEY,
+    active_memberships_for,
+    attach_active_membership,
+    ensure_legacy_memberships_for_business,
+    membership_for_active_business,
+    resolve_web_membership,
+    users_for_business,
+)
 from followups.models import FollowUpTask
 from followups.rules import DELAYED_FOLLOWUP, rule_for_stage
 from followups.tasks import schedule_follow_up
@@ -146,25 +155,37 @@ class TenantWebMixin(LoginRequiredMixin):
     def dispatch(self, request, *args, **kwargs):
         if not request.user.is_authenticated:
             return super().dispatch(request, *args, **kwargs)
-        if not request.user.business_id:
+        membership = resolve_web_membership(request)
+        attach_active_membership(request, membership)
+        if membership is None:
             return render(request, 'web/no_business.html', status=403)
         return super().dispatch(request, *args, **kwargs)
 
+    def get_active_membership(self):
+        membership = getattr(self.request, 'active_membership', None)
+        if membership is None:
+            membership = resolve_web_membership(self.request)
+            attach_active_membership(self.request, membership)
+        return membership
+
     def get_business(self):
-        return self.request.user.business
+        return self.get_active_membership().business
+
+    def get_role(self):
+        return self.get_active_membership().role
 
     def is_manager(self):
-        return self.request.user.role in (User.Role.OWNER, User.Role.MANAGER)
+        return self.get_role() in (User.Role.OWNER, User.Role.MANAGER)
 
     def visible_leads(self):
         queryset = Lead.objects.for_business(self.get_business()).select_related('assigned_user', 'product')
-        if self.request.user.role == User.Role.SALESPERSON:
+        if self.get_role() == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
         return queryset
 
     def visible_tasks(self):
         queryset = FollowUpTask.objects.for_business(self.get_business()).select_related('lead', 'assigned_user')
-        if self.request.user.role == User.Role.SALESPERSON:
+        if self.get_role() == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
         return queryset
 
@@ -175,30 +196,83 @@ class TenantWebMixin(LoginRequiredMixin):
         return get_object_or_404(self.visible_tasks(), pk=pk)
 
     def common_context(self):
+        membership = self.get_active_membership()
         return {
             'business': self.get_business(),
+            'active_membership': membership,
+            'workspace_memberships': active_memberships_for(self.request.user).order_by('business__name', 'id'),
             'is_manager': self.is_manager(),
-            'is_owner': self.request.user.role == User.Role.OWNER,
-            'is_salesperson': self.request.user.role == User.Role.SALESPERSON,
+            'is_owner': self.get_role() == User.Role.OWNER,
+            'is_salesperson': self.get_role() == User.Role.SALESPERSON,
         }
 
 
 class OwnerRequiredMixin(TenantWebMixin):
     def dispatch(self, request, *args, **kwargs):
-        if not request.user.is_authenticated or not request.user.business_id:
+        if not request.user.is_authenticated:
             return super().dispatch(request, *args, **kwargs)
-        if request.user.role != User.Role.OWNER:
+        membership = resolve_web_membership(request)
+        attach_active_membership(request, membership)
+        if membership is None:
+            return super().dispatch(request, *args, **kwargs)
+        if membership.role != User.Role.OWNER:
             return HttpResponseForbidden('Only a business owner can manage this area.')
         return super().dispatch(request, *args, **kwargs)
 
 
 class ManagerRequiredMixin(TenantWebMixin):
     def dispatch(self, request, *args, **kwargs):
-        if not request.user.is_authenticated or not request.user.business_id:
+        if not request.user.is_authenticated:
             return super().dispatch(request, *args, **kwargs)
-        if request.user.role not in (User.Role.OWNER, User.Role.MANAGER):
+        membership = resolve_web_membership(request)
+        attach_active_membership(request, membership)
+        if membership is None:
+            return super().dispatch(request, *args, **kwargs)
+        if membership.role not in (User.Role.OWNER, User.Role.MANAGER):
             return HttpResponseForbidden('This area is for owners and managers.')
         return super().dispatch(request, *args, **kwargs)
+
+
+class WorkspaceSwitchView(LoginRequiredMixin, View):
+    """Switch the session to one membership the signed-in user actually owns."""
+
+    def post(self, request):
+        membership = membership_for_active_business(request.user, request.POST.get('business_id'))
+        if membership is None:
+            return HttpResponseForbidden('You do not have access to that workspace.')
+        request.session[ACTIVE_BUSINESS_SESSION_KEY] = str(membership.business_id)
+        attach_active_membership(request, membership)
+        messages.success(request, f'You are now working in {membership.business.name}.')
+        # Always start at the new workspace overview.  It prevents a URL from
+        # the old tenant being carried into a business where it is irrelevant.
+        return redirect('web:dashboard')
+
+
+class BusinessCreateView(OwnerRequiredMixin, FormView):
+    """Let an owner create and immediately enter another business workspace."""
+
+    template_name = 'web/business_create.html'
+    form_class = BusinessForm
+
+    def form_valid(self, form):
+        with transaction.atomic():
+            business = form.save()
+            Membership.objects.create(
+                user=self.request.user,
+                business=business,
+                role=User.Role.OWNER,
+                is_active=True,
+            )
+            # The legacy User.business field intentionally remains unchanged.
+            # Session context is the authoritative active workspace.
+            self.request.session[ACTIVE_BUSINESS_SESSION_KEY] = str(business.id)
+        messages.success(self.request, f'{business.name} is ready for your team.')
+        return redirect('web:dashboard')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
 
 
 class OnboardingView(OwnerRequiredMixin, TemplateView):
@@ -210,7 +284,11 @@ class OnboardingView(OwnerRequiredMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'lead_count': Lead.objects.for_business(business).count(),
-            'team_count': User.objects.filter(business=business, is_active=True).count(),
+            'team_count': Membership.objects.filter(
+                business=business,
+                is_active=True,
+                user__is_active=True,
+            ).count(),
             'product_count': Product.objects.for_business(business).filter(is_active=True).count(),
         })
         return context
@@ -224,11 +302,10 @@ class DashboardView(TenantWebMixin, TemplateView):
         # A salesperson's command centre is their personal pipeline. Sending
         # them there keeps the default route focused rather than a cut-down
         # version of the manager dashboard.
-        if (
-            request.user.is_authenticated
-            and request.user.business_id
-            and request.user.role == User.Role.SALESPERSON
-        ):
+        membership = resolve_web_membership(request) if request.user.is_authenticated else None
+        if membership is not None:
+            attach_active_membership(request, membership)
+        if membership is not None and membership.role == User.Role.SALESPERSON:
             return redirect('web:lead-list')
         return super().dispatch(request, *args, **kwargs)
 
@@ -312,11 +389,7 @@ class DashboardView(TenantWebMixin, TemplateView):
         win_rate = round(stage_totals.get(Lead.Stage.WON, 0) * 100 / closed_count) if closed_count else 0
 
         team_attention = []
-        for teammate in User.objects.filter(
-            business=business,
-            is_active=True,
-            role__in=(User.Role.OWNER, User.Role.MANAGER, User.Role.SALESPERSON),
-        ).order_by('first_name', 'username'):
+        for teammate in users_for_business(business).order_by('first_name', 'username'):
             member_leads = active_leads.filter(assigned_user=teammate)
             member_stalled = member_leads.filter(last_activity_at__lt=stale_cutoff).count()
             member_due = open_tasks.filter(assigned_user=teammate, due_at__date=today).count()
@@ -372,7 +445,7 @@ class LeadListView(TenantWebMixin, TemplateView):
         # visible_leads() avoids loading assignees and contact data for every
         # record before the seven columns are rendered.
         queryset = Lead.objects.for_business(self.get_business())
-        if self.request.user.role == User.Role.SALESPERSON:
+        if self.get_role() == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
         return queryset
 
@@ -450,9 +523,9 @@ class LeadListView(TenantWebMixin, TemplateView):
             'selected_stage': selected_stage,
             'selected_assigned_user': selected_assigned_user,
             'search': search,
-            'assignees': User.objects.filter(
-                business=self.get_business(), is_active=True,
-            ).order_by('first_name', 'last_name', 'username') if self.is_manager() else [self.request.user],
+            'assignees': users_for_business(self.get_business()).order_by(
+                'first_name', 'last_name', 'username',
+            ) if self.is_manager() else [self.request.user],
             'board_filter_query': urlencode(board_filter_params),
             'lead_summary': {
                 'total': summary['total'],
@@ -543,9 +616,9 @@ class LeadStageListView(TenantWebMixin, ListView):
             'selected_ordering': self.request.GET.get('ordering', '-last_activity_at'),
             'source_choices': Lead.Source.choices,
             'ordering_choices': self.ORDERING_CHOICES,
-            'assignees': User.objects.filter(
-                business=self.get_business(), is_active=True,
-            ).order_by('first_name', 'last_name', 'username') if self.is_manager() else [self.request.user],
+            'assignees': users_for_business(self.get_business()).order_by(
+                'first_name', 'last_name', 'username',
+            ) if self.is_manager() else [self.request.user],
             'products': Product.objects.for_business(self.get_business()).filter(is_active=True).order_by('name'),
             'query_string': query_params.urlencode(),
         })
@@ -563,7 +636,11 @@ class LeadCreateView(TenantWebMixin, FormView):
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
-        kwargs.update({'business': self.get_business(), 'user': self.request.user})
+        kwargs.update({
+            'business': self.get_business(),
+            'user': self.request.user,
+            'role': self.get_role(),
+        })
         return kwargs
 
     def form_valid(self, form):
@@ -599,7 +676,12 @@ class LeadDetailView(TenantWebMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'lead': lead,
-            'details_form': LeadDetailsForm(instance=lead, business=self.get_business(), user=self.request.user),
+            'details_form': LeadDetailsForm(
+                instance=lead,
+                business=self.get_business(),
+                user=self.request.user,
+                role=self.get_role(),
+            ),
             'stage_form': LeadStageForm(initial={'stage': lead.stage}),
             'activity_form': ActivityForm(initial={'kind': Activity.Kind.CALL}),
             'follow_up_form': LeadFollowUpForm(),
@@ -613,10 +695,16 @@ class LeadDetailView(TenantWebMixin, TemplateView):
 class LeadUpdateView(TenantWebMixin, View):
     def post(self, request, pk):
         lead = self.get_visible_lead(pk)
-        form = LeadDetailsForm(request.POST, instance=lead, business=self.get_business(), user=request.user)
+        form = LeadDetailsForm(
+            request.POST,
+            instance=lead,
+            business=self.get_business(),
+            user=request.user,
+            role=self.get_role(),
+        )
         if form.is_valid():
             updated_lead = form.save(commit=False)
-            if request.user.role == User.Role.SALESPERSON:
+            if self.get_role() == User.Role.SALESPERSON:
                 updated_lead.assigned_user = lead.assigned_user
             updated_lead.save()
             transaction.on_commit(lambda: invalidate_business_lead_cache(updated_lead.business_id))
@@ -641,7 +729,7 @@ class LeadStageUpdateView(TenantWebMixin, View):
         note = form.cleaned_data.get('note', '').strip()
         with transaction.atomic():
             locked_lead = Lead.objects.for_business(self.get_business()).select_for_update().get(pk=lead.pk)
-            if request.user.role == User.Role.SALESPERSON and locked_lead.assigned_user_id != request.user.id:
+            if self.get_role() == User.Role.SALESPERSON and locked_lead.assigned_user_id != request.user.id:
                 return HttpResponseForbidden('You can only update your own leads.')
 
             previous_stage = locked_lead.stage
@@ -789,7 +877,7 @@ class TaskCompleteView(TenantWebMixin, View):
             return redirect(safe_post_redirect(request, 'web:task-list'))
         with transaction.atomic():
             task = FollowUpTask.objects.for_business(self.get_business()).select_for_update().get(pk=task.pk)
-            if request.user.role == User.Role.SALESPERSON and task.assigned_user_id != request.user.id:
+            if self.get_role() == User.Role.SALESPERSON and task.assigned_user_id != request.user.id:
                 return HttpResponseForbidden('You can only complete your own tasks.')
             if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
                 messages.error(request, 'That follow-up is already closed.')
@@ -830,16 +918,19 @@ class TeamListView(OwnerRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.update(self.common_context())
-        context['team'] = User.objects.filter(business=self.get_business()).order_by('-is_active', 'role', 'first_name', 'username')
-        context['form'] = TeamUserForm()
+        ensure_legacy_memberships_for_business(self.get_business())
+        context['team'] = Membership.objects.filter(
+            business=self.get_business(),
+        ).select_related('user').order_by(
+            '-is_active', 'role', 'user__first_name', 'user__username',
+        )
+        context['form'] = TeamUserForm(business=self.get_business())
         return context
 
     def post(self, request, *args, **kwargs):
-        form = TeamUserForm(request.POST)
+        form = TeamUserForm(request.POST, business=self.get_business())
         if form.is_valid():
-            user = form.save(commit=False)
-            user.business = self.get_business()
-            user.save()
+            user = form.save()
             messages.success(request, f'{user.get_full_name() or user.username} was added to your team.')
             return redirect('web:team-list')
         context = self.get_context_data()
@@ -877,11 +968,16 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
     template_name = 'web/edit_form.html'
 
     def get_queryset(self):
-        return User.objects.filter(business=self.get_business())
+        return users_for_business(self.get_business(), active_only=False)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['business'] = self.get_business()
+        return kwargs
 
     def form_valid(self, form):
         member = form.save()
-        transaction.on_commit(lambda: invalidate_business_lead_cache(member.business_id))
+        transaction.on_commit(lambda: invalidate_business_lead_cache(self.get_business().id))
         messages.success(self.request, 'Team member updated.')
         return redirect('web:team-list')
 
@@ -895,16 +991,23 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
 
 class TeamDeleteView(OwnerRequiredMixin, View):
     def post(self, request, pk):
-        member = get_object_or_404(User, pk=pk, business=self.get_business())
-        if member == request.user:
+        membership = get_object_or_404(
+            Membership.objects.select_related('user'),
+            user_id=pk,
+            business=self.get_business(),
+        )
+        if membership.user == request.user:
             messages.error(request, 'You cannot deactivate your own account.')
-        elif member.role == User.Role.OWNER and User.objects.filter(
-            business=self.get_business(), role=User.Role.OWNER, is_active=True,
+        elif membership.role == User.Role.OWNER and membership.is_active and Membership.objects.filter(
+            business=self.get_business(),
+            role=User.Role.OWNER,
+            is_active=True,
+            user__is_active=True,
         ).count() == 1:
             messages.error(request, 'A business must keep at least one active owner.')
         else:
-            member.is_active = False
-            member.save(update_fields=('is_active',))
+            membership.is_active = False
+            membership.save(update_fields=('is_active',))
             messages.success(request, 'Team member deactivated. Their lead history is still intact.')
         return redirect('web:team-list')
 
