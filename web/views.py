@@ -248,6 +248,33 @@ class WorkspaceSwitchView(LoginRequiredMixin, View):
         return redirect('web:dashboard')
 
 
+class BusinessCreateView(OwnerRequiredMixin, FormView):
+    """Let an owner create and immediately enter another business workspace."""
+
+    template_name = 'web/business_create.html'
+    form_class = BusinessForm
+
+    def form_valid(self, form):
+        with transaction.atomic():
+            business = form.save()
+            Membership.objects.create(
+                user=self.request.user,
+                business=business,
+                role=User.Role.OWNER,
+                is_active=True,
+            )
+            # The legacy User.business field intentionally remains unchanged.
+            # Session context is the authoritative active workspace.
+            self.request.session[ACTIVE_BUSINESS_SESSION_KEY] = str(business.id)
+        messages.success(self.request, f'{business.name} is ready for your team.')
+        return redirect('web:dashboard')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
+
 class OnboardingView(OwnerRequiredMixin, TemplateView):
     template_name = 'web/onboarding.html'
 

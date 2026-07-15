@@ -98,6 +98,66 @@ class WebWorkspaceSwitchingTests(TestCase):
         self.assertEqual(self.client.session[ACTIVE_BUSINESS_SESSION_KEY], str(self.solar.id))
 
 
+class OwnerBusinessCreationTests(TestCase):
+    def setUp(self):
+        self.original_business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='workspace-owner',
+            password='test-password',
+            business=self.original_business,
+            role=User.Role.OWNER,
+        )
+        Membership.objects.create(
+            user=self.owner,
+            business=self.original_business,
+            role=User.Role.OWNER,
+        )
+        self.salesperson = User.objects.create_user(
+            username='workspace-salesperson',
+            password='test-password',
+            business=self.original_business,
+            role=User.Role.SALESPERSON,
+        )
+        Membership.objects.create(
+            user=self.salesperson,
+            business=self.original_business,
+            role=User.Role.SALESPERSON,
+        )
+
+    def test_owner_can_create_a_new_business_and_is_switched_into_it(self):
+        self.client.force_login(self.owner)
+
+        form_response = self.client.get(reverse('web:business-create'))
+        response = self.client.post(
+            reverse('web:business-create'),
+            {
+                'name': 'Adeel CCTV',
+                'industry': Business.Industry.CCTV,
+                'timezone': 'Asia/Karachi',
+            },
+        )
+
+        created_business = Business.objects.get(name='Adeel CCTV')
+        membership = Membership.objects.get(user=self.owner, business=created_business)
+        self.assertEqual(form_response.status_code, 200)
+        self.assertContains(form_response, 'Create business')
+        self.assertRedirects(response, reverse('web:dashboard'))
+        self.assertEqual(membership.role, User.Role.OWNER)
+        self.assertTrue(membership.is_active)
+        self.assertEqual(self.client.session[ACTIVE_BUSINESS_SESSION_KEY], str(created_business.id))
+        # The old one-to-one compatibility key stays on the original business;
+        # active workspace resolution comes from membership + session.
+        self.owner.refresh_from_db()
+        self.assertEqual(self.owner.business, self.original_business)
+
+    def test_salesperson_cannot_open_the_business_creation_flow(self):
+        self.client.force_login(self.salesperson)
+
+        response = self.client.get(reverse('web:business-create'))
+
+        self.assertEqual(response.status_code, 403)
+
+
 class ApiWorkspaceTokenTests(APITestCase):
     def setUp(self):
         self.solar = Business.objects.create(name='North Star Solar')

@@ -25,6 +25,7 @@ One running application serves independent businesses. Each `Business` is a tena
 - Every tenant-owned model has a required `business` relationship through `TenantScopedModel`.
 - A global `User` can have one or more active `Membership` records. A membership carries that person's role for one business.
 - Web requests resolve the active workspace from a validated server-side session value. The sidebar switcher only lists active memberships and every switch is re-validated server-side.
+- Owners can create another business directly from that switcher; Cuein creates an owner membership and enters the new workspace without changing the legacy `User.business` bridge.
 - JWTs are scoped to exactly one business. A person with multiple memberships must include `business_id` when requesting a token; the API never trusts a mutable client-supplied workspace header.
 - API and web queries begin with the resolved active business, not the legacy `User.business` compatibility field.
 - Related products, leads, tasks, and users are validated against the same business.

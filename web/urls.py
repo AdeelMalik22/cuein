@@ -2,7 +2,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from .views import (
-    BusinessSettingsView, DashboardView, EmailVerificationResendView, EmailVerificationSentView,
+    BusinessCreateView, BusinessSettingsView, DashboardView, EmailVerificationResendView, EmailVerificationSentView,
     EmailVerificationView, LandingView, LeadActivityCreateView, LeadCreateView,
     LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageListView, LeadStageUpdateView,
     LeadUpdateView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ProfileView, ReportsView,
@@ -21,6 +21,7 @@ urlpatterns = [
     path('login/', auth_views.LoginView.as_view(template_name='web/login.html'), name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('workspaces/switch/', WorkspaceSwitchView.as_view(), name='workspace-switch'),
+    path('workspaces/new/', BusinessCreateView.as_view(), name='business-create'),
     path('onboarding/', OnboardingView.as_view(), name='onboarding'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('leads/', LeadListView.as_view(), name='lead-list'),
