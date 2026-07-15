@@ -288,6 +288,7 @@ class ReportsSalespersonPaginationTests(TestCase):
         )
         self.assertContains(response, 'Showing 10 of 12 salespeople')
         self.assertContains(response, '?salespeople_limit=12#salesperson-conversion')
+        self.assertContains(response, 'The best follow-up is the one your customer never has to chase.')
 
         expanded_response = self.client.get(reverse('web:reports'), {'salespeople_limit': 20})
 
