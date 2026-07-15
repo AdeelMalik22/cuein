@@ -1080,6 +1080,7 @@ a.nav-item:hover, .nav-item:hover, .nav-item.active {
 .lead-trend-chart {
     margin: .15rem -.25rem 0;
     min-width: 0;
+    position: relative;
 }
 
 .lead-trend-chart svg {
@@ -1121,15 +1122,51 @@ a.nav-item:hover, .nav-item:hover, .nav-item.active {
 }
 
 .lead-trend-dot {
+    cursor: default;
     fill: var(--surface);
     stroke: var(--accent);
     stroke-width: 2.4;
     transition: r .18s ease, fill .18s ease;
 }
 
-.lead-trend-dot:hover {
+.lead-trend-dot:hover, .lead-trend-dot.is-active, .lead-trend-dot:focus-visible {
     fill: var(--accent);
     r: 5;
+}
+
+.lead-trend-tooltip {
+    background: var(--ink);
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: .65rem;
+    box-shadow: 0 12px 30px rgba(17, 17, 17, .22);
+    color: var(--paper);
+    display: grid;
+    gap: .18rem;
+    left: 0;
+    max-width: min(220px, calc(100% - 1rem));
+    padding: .64rem .72rem;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    white-space: nowrap;
+    z-index: 2;
+}
+
+.lead-trend-tooltip[hidden] {
+    display: none;
+}
+
+.lead-trend-tooltip strong {
+    color: var(--paper);
+    font-size: .75rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.lead-trend-tooltip span {
+    color: #c7c7c2;
+    font-size: .67rem;
+    line-height: 1.2;
 }
 
 .lead-trend-footnote {

@@ -137,9 +137,8 @@
                     <p class="panel-intro">A 14-day view of fresh inquiries in this workspace.</p></div>
                 <span class="analytics-stat"><strong>{{ lead_trend_total }}</strong><small>new in 14 days</small></span>
             </div>
-            <div class="lead-trend-chart">
-                <svg viewBox="0 0 560 174" role="img" aria-labelledby="lead-trend-chart-title lead-trend-chart-description">
-                    <title id="lead-trend-chart-title">New leads added over the last 14 days</title>
+            <div class="lead-trend-chart" data-lead-trend-chart>
+                <svg viewBox="0 0 560 174" role="img" aria-label="New leads added over the last 14 days" aria-describedby="lead-trend-chart-description">
                     <desc id="lead-trend-chart-description">{{ lead_trend_total }} new lead{{ lead_trend_total|pluralize }} added in the current workspace.</desc>
                     <defs>
                         <linearGradient id="lead-trend-fill" x1="0" x2="0" y1="0" y2="1">
@@ -154,14 +153,19 @@
                     <polygon class="lead-trend-area" points="{{ lead_trend_area_points }}"></polygon>
                     <polyline class="lead-trend-line" points="{{ lead_trend_points }}"></polyline>
                     {% for day in lead_trend_days %}
-                        <circle class="lead-trend-dot" cx="{{ day.x }}" cy="{{ day.y }}" r="3.6">
-                            <title>{{ day.label }}: {{ day.count }} new lead{{ day.count|pluralize }}</title>
-                        </circle>
+                        <circle class="lead-trend-dot" cx="{{ day.x }}" cy="{{ day.y }}" r="3.6"
+                                data-lead-trend-point data-date="{{ day.label }}" data-count="{{ day.count }}"
+                                tabindex="0" aria-describedby="lead-trend-tooltip"
+                                aria-label="{{ day.label }}: {{ day.count }} new lead{{ day.count|pluralize }}"></circle>
                         {% if day.show_label %}
                             <text class="lead-trend-axis-label" x="{{ day.x }}" y="161" text-anchor="middle">{{ day.short_label }}</text>
                         {% endif %}
                     {% endfor %}
                 </svg>
+                <div class="lead-trend-tooltip" id="lead-trend-tooltip" data-lead-trend-tooltip role="tooltip" hidden>
+                    <strong data-lead-trend-tooltip-primary></strong>
+                    <span data-lead-trend-tooltip-delta></span>
+                </div>
             </div>
             {% if lead_trend_total %}
                 <p class="panel-footnote lead-trend-footnote"><strong>Peak day:</strong> {{ lead_trend_peak.count }} new lead{{ lead_trend_peak.count|pluralize }} on {{ lead_trend_peak.label }}.</p>
