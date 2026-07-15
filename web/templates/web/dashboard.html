@@ -139,7 +139,7 @@
             <div class="team-pulse-list">
                 {% for row in team_attention %}
                     <div class="team-pulse-row {% if row.needs_attention %}needs-attention{% endif %}">
-                        <span class="avatar avatar-small">{{ row.member.username|first|upper }}</span>
+                        {% include 'web/components/profile_avatar.html' with avatar_user=row.member avatar_class='avatar avatar-small' %}
                         <span><strong>{{ row.member.get_full_name|default:row.member.username }}</strong><small>{{ row.active_count }} open lead{{ row.active_count|pluralize }}</small></span>
                         <span class="team-pulse-meta">{% if row.stalled_count %}
                             <b>{{ row.stalled_count }} stalled</b>{% elif row.due_count %}

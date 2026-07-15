@@ -140,6 +140,11 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'web' / 'static']
 
+# User-uploaded profile pictures. In production these files should be served
+# by the deployment's media storage; Django serves them locally in DEBUG mode.
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 LOGIN_URL = 'web:login'
 LOGIN_REDIRECT_URL = 'web:dashboard'
 LOGOUT_REDIRECT_URL = 'web:login'

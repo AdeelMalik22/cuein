@@ -5,7 +5,7 @@ from .views import (
     BusinessSettingsView, DashboardView, EmailVerificationResendView, EmailVerificationSentView,
     EmailVerificationView, LandingView, LeadActivityCreateView, LeadCreateView,
     LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageListView, LeadStageUpdateView,
-    LeadUpdateView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ReportsView,
+    LeadUpdateView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ProfileView, ReportsView,
     SignupView, TaskCompleteView, TaskListView, TaskRescheduleView, TeamDeleteView, TeamEditView,
     TeamListView,
 )
@@ -34,6 +34,7 @@ urlpatterns = [
     path('follow-ups/', TaskListView.as_view(), name='task-list'),
     path('follow-ups/<uuid:pk>/complete/', TaskCompleteView.as_view(), name='task-complete'),
     path('follow-ups/<uuid:pk>/reschedule/', TaskRescheduleView.as_view(), name='task-reschedule'),
+    path('profile/', ProfileView.as_view(), name='profile'),
     path('team/', TeamListView.as_view(), name='team-list'),
     path('team/<uuid:pk>/edit/', TeamEditView.as_view(), name='team-edit'),
     path('team/<uuid:pk>/delete/', TeamDeleteView.as_view(), name='team-delete'),

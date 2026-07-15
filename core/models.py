@@ -107,6 +107,7 @@ class User(AbstractUser):
         default=Role.SALESPERSON,
     )
     phone = models.CharField(max_length=32, blank=True)
+    profile_picture = models.ImageField(upload_to='profile_pictures/', blank=True)
     email_verified_at = models.DateTimeField(null=True, blank=True)
     email_verification_sent_at = models.DateTimeField(null=True, blank=True)
 

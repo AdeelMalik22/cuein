@@ -11,6 +11,84 @@ from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product
 
 
+class AvatarRadioSelect(forms.RadioSelect):
+    """Render assignee choices in a photo-and-name dropdown."""
+
+    template_name = 'web/widgets/avatar_radio_select.html'
+
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        account = getattr(value, 'instance', None)
+        is_empty_choice = str(value) == ''
+        if account is None and is_empty_choice:
+            account = getattr(self, 'empty_choice_user', None)
+
+        option['attrs']['class'] = 'assignee-dropdown-input'
+        option['is_empty_choice'] = is_empty_choice
+        option['avatar_url'] = ''
+        option['display_name'] = str(label)
+        option['secondary_label'] = ''
+
+        if account:
+            if account.profile_picture:
+                option['avatar_url'] = account.profile_picture.url
+            account_name = account.get_full_name() or account.username
+            if is_empty_choice:
+                option['display_name'] = 'Assign to me'
+                option['secondary_label'] = f'{account_name} · your account'
+            else:
+                option['display_name'] = account_name
+                option['secondary_label'] = account.email or account.username
+        return option
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        selected_option = None
+        first_option = None
+        for _group_name, options, _index in context['widget']['optgroups']:
+            for option in options:
+                first_option = first_option or option
+                if option['selected']:
+                    selected_option = option
+        context['widget']['selected_option'] = selected_option or first_option
+        return context
+
+
+class ProfileForm(forms.ModelForm):
+    profile_picture = forms.ImageField(
+        required=False,
+        widget=forms.FileInput(attrs={'accept': 'image/png,image/jpeg,image/webp'}),
+    )
+
+    class Meta:
+        model = User
+        fields = ('first_name', 'last_name', 'email', 'username', 'phone', 'profile_picture')
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        other_users = User.objects.exclude(pk=self.instance.pk)
+        if other_users.filter(username__iexact=username).exists() or PendingRegistration.objects.filter(
+            username__iexact=username,
+        ).exists():
+            raise ValidationError('This username is already in use.')
+        return username
+
+    def clean_email(self):
+        email = self.cleaned_data['email'].strip().lower()
+        other_users = User.objects.exclude(pk=self.instance.pk)
+        if other_users.filter(email__iexact=email).exists() or PendingRegistration.objects.filter(
+            email__iexact=email,
+        ).exists():
+            raise ValidationError('An account already uses this email address.')
+        return email
+
+    def clean_profile_picture(self):
+        picture = self.cleaned_data.get('profile_picture')
+        if picture and picture.size > 5 * 1024 * 1024:
+            raise ValidationError('Choose an image smaller than 5 MB.')
+        return picture
+
+
 class SignupForm(forms.Form):
     business_name = forms.CharField(max_length=255)
     industry = forms.ChoiceField(choices=Business.Industry.choices)
@@ -143,8 +221,12 @@ class LeadQuickAddForm(forms.ModelForm):
         self.fields['source'].initial = Lead.Source.PHONE_CALL
         self.fields['assigned_user'].queryset = User.objects.filter(
             business=business, is_active=True,
-        ).order_by('first_name', 'username')
+        ).exclude(pk=user.pk).order_by('first_name', 'username')
         self.fields['assigned_user'].required = False
+        self.fields['assigned_user'].empty_label = 'Assign to me'
+        self.fields['assigned_user'].widget = AvatarRadioSelect()
+        self.fields['assigned_user'].widget.empty_choice_user = user
+        self.fields['assigned_user'].widget.choices = self.fields['assigned_user'].choices
         if user.role == User.Role.SALESPERSON:
             self.fields.pop('assigned_user')
 
@@ -164,6 +246,9 @@ class LeadDetailsForm(forms.ModelForm):
             business=business, is_active=True,
         ).order_by('first_name', 'username')
         self.fields['assigned_user'].required = True
+        self.fields['assigned_user'].empty_label = None
+        self.fields['assigned_user'].widget = AvatarRadioSelect()
+        self.fields['assigned_user'].widget.choices = self.fields['assigned_user'].choices
         if user.role == User.Role.SALESPERSON:
             self.fields.pop('assigned_user')
 

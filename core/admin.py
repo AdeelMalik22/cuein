@@ -14,7 +14,7 @@ class BusinessAdmin(admin.ModelAdmin):
 @admin.register(User)
 class CueinUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (
-        ('Cuein', {'fields': ('business', 'role', 'phone')}),
+        ('Cuein', {'fields': ('business', 'role', 'phone', 'profile_picture')}),
         ('Email verification', {'fields': ('email_verified_at', 'email_verification_sent_at')}),
     )
     readonly_fields = ('email_verified_at', 'email_verification_sent_at')

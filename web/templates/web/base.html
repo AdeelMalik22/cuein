@@ -65,12 +65,6 @@
         {% endif %}
       </nav>
 
-      <form method="post" action="{% url 'web:logout' %}" class="logout-form">
-        {% csrf_token %}
-        <button class="nav-item" type="submit">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M13 4h5a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-5"></path></svg><span>Log out</span>
-        </button>
-      </form>
     </aside>
 
     <main class="main-content">
@@ -84,10 +78,26 @@
           <span class="workspace-name">{{ business.name }}</span>
           <span class="workspace-role">{{ request.user.get_role_display }}</span>
         </div>
-        <div class="topbar-user">
-          <span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span>
-          <span><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ request.user.email|default:request.user.username }}</small></span>
-        </div>
+        <details class="topbar-user-menu">
+          <summary class="topbar-user" aria-label="Open account menu">
+            {% include 'web/components/profile_avatar.html' with avatar_user=request.user avatar_class='avatar topbar-avatar' %}
+            <span class="topbar-user-copy"><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ request.user.email|default:request.user.username }}</small></span>
+            <svg class="topbar-user-chevron" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></svg>
+          </summary>
+          <div class="account-menu-panel">
+            <a class="account-menu-action" href="{% url 'web:profile' %}">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.25"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path></svg>
+              <span><strong>Profile</strong><small>View and edit your account</small></span>
+            </a>
+            <form method="post" action="{% url 'web:logout' %}">
+              {% csrf_token %}
+              <button class="account-menu-action account-menu-logout" type="submit">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5M15 12H3M13 4h5a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-5"></path></svg>
+                <span><strong>Log out</strong><small>End this secure session</small></span>
+              </button>
+            </form>
+          </div>
+        </details>
       </header>
       {% endblock %}
       {% if messages %}

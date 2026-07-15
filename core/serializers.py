@@ -17,7 +17,7 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'first_name', 'last_name', 'email', 'phone', 'role', 'business')
+        fields = ('id', 'username', 'first_name', 'last_name', 'email', 'phone', 'profile_picture', 'role', 'business')
 
 
 class TeamUserSerializer(serializers.ModelSerializer):
