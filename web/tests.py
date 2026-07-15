@@ -222,7 +222,12 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(source_rows[Lead.Source.WEBSITE]['total'], 1)
         self.assertNotIn(Lead.Source.FACEBOOK, source_rows)
         self.assertEqual(response.context['analytics_win_rate'], 100)
+        self.assertEqual(response.context['lead_trend_total'], 2)
+        self.assertEqual(len(response.context['lead_trend_days']), 14)
+        self.assertEqual(sum(day['count'] for day in response.context['lead_trend_days']), 2)
         self.assertContains(response, 'See the shape of your pipeline.')
+        self.assertContains(response, 'New leads over time')
+        self.assertContains(response, 'lead-trend-chart')
         self.assertContains(response, 'data-live-clock')
         self.assertContains(response, 'data-sidebar-toggle')
 
