@@ -275,11 +275,18 @@ svg {
     color: var(--paper);
     cursor: pointer;
     display: grid;
-    gap: .08rem .45rem;
-    grid-template-columns: 1fr auto;
+    gap: .45rem;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 54px;
     padding: .6rem .7rem;
     list-style: none;
+}
+
+.workspace-switcher-copy {
+    display: grid;
+    gap: .08rem;
+    min-width: 0;
+    text-align: left;
 }
 
 .workspace-switcher > summary::-webkit-details-marker {
@@ -300,7 +307,8 @@ svg {
     text-transform: uppercase;
 }
 
-.workspace-switcher > summary strong {
+.workspace-switcher-copy strong {
+    display: block;
     font-size: .78rem;
     line-height: 1.2;
     overflow: hidden;
@@ -309,8 +317,8 @@ svg {
 }
 
 .workspace-switcher > summary svg {
-    grid-row: 1 / span 2;
     height: 16px;
+    justify-self: end;
     transition: transform .18s ease;
     width: 16px;
 }

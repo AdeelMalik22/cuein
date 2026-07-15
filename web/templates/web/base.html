@@ -31,8 +31,10 @@
       {% if active_membership %}
         <details class="workspace-switcher">
           <summary aria-label="Switch workspace">
-            <span class="workspace-switcher-label">Workspace</span>
-            <strong>{{ business.name }}</strong>
+            <span class="workspace-switcher-copy">
+              <span class="workspace-switcher-label">Workspace</span>
+              <strong>{{ business.name }}</strong>
+            </span>
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></svg>
           </summary>
           <div class="workspace-switcher-panel">
