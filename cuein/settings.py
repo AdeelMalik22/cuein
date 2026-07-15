@@ -42,8 +42,10 @@ SECRET_KEY = 'django-insecure-(59r7w^v=bf5jwg36#dxi7iolsydln@8vwc-7!xb5aw9hr*@p7
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = [
+    "18.212.153.6",
+    "ec2-18-212-153-6.compute-1.amazonaws.com",
+]
 
 # Application definition
 
@@ -69,6 +71,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
 
 ROOT_URLCONF = 'cuein.urls'
