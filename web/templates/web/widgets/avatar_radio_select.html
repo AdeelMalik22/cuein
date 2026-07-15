@@ -1,0 +1,30 @@
+{% load static %}
+{% with selected=widget.selected_option %}
+  <details class="assignee-dropdown" data-assignee-dropdown data-fallback-avatar="{% static 'web/images/default-profile-avatar.svg' %}">
+    <summary class="assignee-dropdown-toggle" aria-label="Choose the user assigned to this lead">
+      <span class="assignee-dropdown-selected" data-assignee-selected>
+        <span class="profile-avatar assignee-avatar" aria-hidden="true">
+          {% if selected.avatar_url %}<img data-assignee-selected-image src="{{ selected.avatar_url }}" alt="">{% else %}<img data-assignee-selected-image src="{% static 'web/images/default-profile-avatar.svg' %}" alt="">{% endif %}
+        </span>
+        <span class="assignee-dropdown-copy"><strong data-assignee-selected-name>{{ selected.display_name }}</strong><small data-assignee-selected-detail>{{ selected.secondary_label|default:'Choose a teammate' }}</small></span>
+      </span>
+      <svg class="assignee-dropdown-chevron" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></svg>
+    </summary>
+    <div class="assignee-dropdown-menu"{% if widget.attrs.id %} id="{{ widget.attrs.id }}-options"{% endif %}>
+      {% for group, options, index in widget.optgroups %}
+        {% for option in options %}
+          <label class="assignee-dropdown-option" data-assignee-option data-assignee-name="{{ option.display_name }}" data-assignee-detail="{{ option.secondary_label }}"{% if option.avatar_url %} data-assignee-avatar="{{ option.avatar_url }}"{% endif %}>
+            {{ option.tag }}
+            <span class="assignee-dropdown-option-content">
+              <span class="profile-avatar assignee-avatar" aria-hidden="true">
+                {% if option.avatar_url %}<img src="{{ option.avatar_url }}" alt="">{% else %}<img src="{% static 'web/images/default-profile-avatar.svg' %}" alt="">{% endif %}
+              </span>
+              <span class="assignee-dropdown-copy"><strong>{{ option.display_name }}</strong>{% if option.secondary_label %}<small>{{ option.secondary_label }}</small>{% endif %}</span>
+              <span class="assignee-dropdown-check" aria-hidden="true">✓</span>
+            </span>
+          </label>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+{% endwith %}

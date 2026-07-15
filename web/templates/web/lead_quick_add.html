@@ -6,7 +6,18 @@
     <section class="quick-add-card">
       <form method="post" class="quick-add-form">{% csrf_token %}
         {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
-        {% for field in form %}<label class="field {% if field.name == 'customer_name' or field.name == 'phone' or field.name == 'source' %}field-large{% endif %}"><span>{{ field.label }}{% if field.field.required %}<b aria-hidden="true">*</b>{% endif %}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}{% if field.name == 'assigned_user' %}<small class="field-hint">Leave blank to keep this lead with you.</small>{% endif %}</label>{% endfor %}
+        {% for field in form %}
+          {% if field.name == 'assigned_user' %}
+            <fieldset class="field assignee-field">
+              <legend>{{ field.label }}</legend>
+              {{ field }}
+              <small class="field-hint">Choose a teammate, or keep this lead with you.</small>
+              {% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}
+            </fieldset>
+          {% else %}
+            <label class="field {% if field.name == 'customer_name' or field.name == 'phone' or field.name == 'source' %}field-large{% endif %}"><span>{{ field.label }}{% if field.field.required %}<b aria-hidden="true">*</b>{% endif %}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+          {% endif %}
+        {% endfor %}
         <button class="button button-accent" type="submit">Add lead <span aria-hidden="true">→</span></button>
       </form>
     </section>

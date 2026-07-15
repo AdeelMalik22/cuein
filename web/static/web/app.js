@@ -305,6 +305,27 @@
     syncLostReason();
   }
 
+  function setUpAssigneeDropdowns() {
+    document.querySelectorAll("[data-assignee-dropdown]").forEach(function (dropdown) {
+      dropdown.addEventListener("change", function (event) {
+        var input = event.target.closest(".assignee-dropdown-input");
+        if (!input || !dropdown.contains(input)) return;
+
+        var option = input.closest("[data-assignee-option]");
+        var selected = dropdown.querySelector("[data-assignee-selected]");
+        if (!option || !selected) return;
+
+        var selectedImage = selected.querySelector("[data-assignee-selected-image]");
+        var selectedName = selected.querySelector("[data-assignee-selected-name]");
+        var selectedDetail = selected.querySelector("[data-assignee-selected-detail]");
+        if (selectedImage) selectedImage.src = option.dataset.assigneeAvatar || dropdown.dataset.fallbackAvatar;
+        if (selectedName) selectedName.textContent = option.dataset.assigneeName || "Assigned user";
+        if (selectedDetail) selectedDetail.textContent = option.dataset.assigneeDetail || "";
+        dropdown.open = false;
+      });
+    });
+  }
+
   function setUpLiveClocks() {
     document.querySelectorAll("[data-live-clock]").forEach(function (clock) {
       var options = {
@@ -374,6 +395,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     setUpKanban();
     setUpStageForm();
+    setUpAssigneeDropdowns();
     setUpLiveClocks();
     setUpSidebarToggle();
   });

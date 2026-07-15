@@ -37,6 +37,7 @@ from .forms import (
     LeadFollowUpForm,
     LeadQuickAddForm,
     LeadStageForm,
+    ProfileForm,
     ProductForm,
     SignupForm,
     TaskCompletionForm,
@@ -555,6 +556,11 @@ class LeadCreateView(TenantWebMixin, FormView):
     template_name = 'web/lead_quick_add.html'
     form_class = LeadQuickAddForm
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
         kwargs.update({'business': self.get_business(), 'user': self.request.user})
@@ -933,6 +939,27 @@ class ProductDeleteView(OwnerRequiredMixin, View):
         transaction.on_commit(lambda: invalidate_business_lead_cache(product.business_id))
         messages.success(request, 'Product deactivated. Existing lead history is preserved.')
         return redirect('web:product-list')
+
+
+class ProfileView(TenantWebMixin, UpdateView):
+    """Let an authenticated user update only their own account details."""
+
+    model = User
+    form_class = ProfileForm
+    template_name = 'web/profile.html'
+
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def form_valid(self, form):
+        form.save()
+        messages.success(self.request, 'Your profile was updated.')
+        return redirect('web:profile')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
 
 
 class BusinessSettingsView(OwnerRequiredMixin, FormView):

@@ -1,0 +1,8 @@
+{% load static %}
+<span class="profile-avatar {{ avatar_class|default:'avatar' }}" aria-hidden="true">
+  {% if avatar_user.profile_picture %}
+    <img src="{{ avatar_user.profile_picture.url }}" alt="">
+  {% else %}
+    <img src="{% static 'web/images/default-profile-avatar.svg' %}" alt="">
+  {% endif %}
+</span>

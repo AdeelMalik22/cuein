@@ -1,7 +1,11 @@
+import base64
+import shutil
+import tempfile
 from datetime import timedelta
 
 from django.contrib.auth.hashers import make_password
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.test import override_settings
 from django.urls import reverse
@@ -10,6 +14,119 @@ from django.utils import timezone
 from core.models import Business, PendingRegistration, User
 from followups.models import FollowUpTask
 from leads.models import Lead, Product
+
+
+ONE_PIXEL_PNG = base64.b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGM8EmDBwMDAxMDAwMDAAAAQRgFQfoqMXQAAAABJRU5ErkJggg=='
+)
+
+
+class ProfileAndAvatarTests(TestCase):
+    def setUp(self):
+        self.media_root = tempfile.mkdtemp()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_root)
+        self.media_override.enable()
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='owner',
+            password='test-password',
+            first_name='Adeel',
+            last_name='Khan',
+            email='owner@northstar.example',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        self.teammate = User.objects.create_user(
+            username='taken-name',
+            password='test-password',
+            first_name='Sara',
+            last_name='Brown',
+            email='sara@northstar.example',
+            business=self.business,
+            role=User.Role.SALESPERSON,
+            profile_picture='profile_pictures/sara.png',
+        )
+        self.client.force_login(self.owner)
+
+    def tearDown(self):
+        self.media_override.disable()
+        shutil.rmtree(self.media_root, ignore_errors=True)
+        super().tearDown()
+
+    def test_profile_updates_the_signed_in_user_and_saves_a_picture(self):
+        response = self.client.post(
+            reverse('web:profile'),
+            {
+                'first_name': 'Adeel',
+                'last_name': 'Ahmed',
+                'email': 'adeel@northstar.example',
+                'username': 'adeel-ahmed',
+                'phone': '0300 1234567',
+                'profile_picture': SimpleUploadedFile('portrait.png', ONE_PIXEL_PNG, content_type='image/png'),
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertRedirects(response, reverse('web:profile'))
+        self.assertEqual(self.owner.username, 'adeel-ahmed')
+        self.assertEqual(self.owner.email, 'adeel@northstar.example')
+        self.assertTrue(self.owner.profile_picture.name.startswith('profile_pictures/'))
+
+    def test_profile_rejects_a_username_that_is_already_taken(self):
+        response = self.client.post(
+            reverse('web:profile'),
+            {
+                'first_name': self.owner.first_name,
+                'last_name': self.owner.last_name,
+                'email': self.owner.email,
+                'username': self.teammate.username,
+                'phone': '',
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.owner.username, 'owner')
+        self.assertContains(response, 'This username is already in use.')
+
+    def test_assignee_picker_shows_profile_photos_and_the_fallback_avatar(self):
+        response = self.client.get(reverse('web:lead-create'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context['is_owner'])
+        self.assertContains(response, 'assignee-dropdown')
+        self.assertContains(response, 'Assign to me')
+        self.assertContains(response, 'Sara Brown')
+        self.assertContains(response, 'profile_pictures/sara.png')
+        self.assertContains(response, 'default-profile-avatar.svg')
+        self.assertContains(response, reverse('web:team-list'))
+        self.assertContains(response, reverse('web:product-list'))
+        self.assertContains(response, reverse('web:business-settings'))
+
+    def test_owner_can_assign_a_new_lead_from_the_dropdown(self):
+        response = self.client.post(
+            reverse('web:lead-create'),
+            {
+                'customer_name': 'New customer',
+                'phone': '03000000000',
+                'source': Lead.Source.PHONE_CALL,
+                'assigned_user': self.teammate.pk,
+            },
+        )
+
+        lead = Lead.objects.get(customer_name='New customer')
+        self.assertRedirects(response, reverse('web:lead-detail', args=[lead.pk]))
+        self.assertEqual(lead.assigned_user, self.teammate)
+
+    def test_account_menu_and_management_status_switches_are_available(self):
+        profile_response = self.client.get(reverse('web:profile'))
+        team_response = self.client.get(reverse('web:team-list'))
+        service_response = self.client.get(reverse('web:product-list'))
+
+        self.assertContains(profile_response, 'Save profile')
+        self.assertContains(profile_response, 'Log out')
+        self.assertContains(team_response, 'status-toggle')
+        self.assertContains(service_response, 'status-toggle')
 
 
 class DashboardAnalyticsTests(TestCase):

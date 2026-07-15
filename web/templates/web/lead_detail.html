@@ -61,7 +61,17 @@
       <article class="panel lead-summary-panel">
         <div class="panel-heading"><div><p class="eyebrow">LEAD DETAILS</p><h2>Customer & quote</h2></div></div>
         <form method="post" action="{% url 'web:lead-update' lead.pk %}" class="details-form">{% csrf_token %}
-          {% for field in details_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}
+          {% for field in details_form %}
+            {% if field.name == 'assigned_user' %}
+              <fieldset class="field assignee-field">
+                <legend>{{ field.label }}</legend>
+                {{ field }}
+                {% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}
+              </fieldset>
+            {% else %}
+              <label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+            {% endif %}
+          {% endfor %}
           <button class="button button-muted" type="submit">Save details</button>
         </form>
       </article>
