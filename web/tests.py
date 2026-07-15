@@ -14,6 +14,7 @@ from django.utils import timezone
 from core.models import Business, PendingRegistration, User
 from followups.models import FollowUpTask
 from leads.models import Lead, Product
+from web.views import DashboardView
 
 
 ONE_PIXEL_PNG = base64.b64decode(
@@ -232,7 +233,15 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(response, 'data-lead-trend-tooltip')
         self.assertNotContains(response, '<title id="lead-trend-chart-title">')
         self.assertContains(response, 'data-live-clock')
+        self.assertContains(response, 'data-dashboard-greeting')
         self.assertContains(response, 'data-sidebar-toggle')
+
+    def test_dashboard_greeting_matches_the_local_hour(self):
+        self.assertEqual(DashboardView.greeting_for_hour(6), 'Good morning')
+        self.assertEqual(DashboardView.greeting_for_hour(12), 'Good afternoon')
+        self.assertEqual(DashboardView.greeting_for_hour(16), 'Good afternoon')
+        self.assertEqual(DashboardView.greeting_for_hour(17), 'Good evening')
+        self.assertEqual(DashboardView.greeting_for_hour(18), 'Good evening')
 
 
 class EmailVerificationTests(TestCase):

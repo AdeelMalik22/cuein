@@ -453,6 +453,44 @@
     });
   }
 
+  function setUpDashboardGreetings() {
+    document.querySelectorAll("[data-dashboard-greeting]").forEach(function (greeting) {
+      var options = { hour: "numeric", hourCycle: "h23" };
+      var timeZone = greeting.dataset.timeZone;
+      var userName = greeting.dataset.userName || "there";
+      if (timeZone) options.timeZone = timeZone;
+
+      var formatter;
+      try {
+        formatter = new Intl.DateTimeFormat("en-PK", options);
+      } catch (error) {
+        delete options.timeZone;
+        formatter = new Intl.DateTimeFormat("en-PK", options);
+      }
+
+      function greetingForHour(hour) {
+        if (hour < 12) return "Good morning";
+        if (hour < 17) return "Good afternoon";
+        return "Good evening";
+      }
+
+      function updateGreeting() {
+        var hourPart = formatter.formatToParts(new Date()).filter(function (part) {
+          return part.type === "hour";
+        })[0];
+        var hour = Number(hourPart && hourPart.value);
+        if (Number.isNaN(hour)) return;
+        greeting.textContent = greetingForHour(hour) + ", " + userName + ".";
+      }
+
+      updateGreeting();
+      window.setTimeout(function () {
+        updateGreeting();
+        window.setInterval(updateGreeting, 60000);
+      }, 60000 - (Date.now() % 60000));
+    });
+  }
+
   function setUpSidebarToggle() {
     var toggle = document.querySelector("[data-sidebar-toggle]");
     var sidebar = document.getElementById("workspace-sidebar");
@@ -507,6 +545,7 @@
     setUpAssigneeDropdowns();
     setUpLeadTrendTooltips();
     setUpLiveClocks();
+    setUpDashboardGreetings();
     setUpSidebarToggle();
   });
 }());

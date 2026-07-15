@@ -305,6 +305,14 @@ class DashboardView(TenantWebMixin, TemplateView):
     LEAD_TREND_CHART_TOP = 18
     LEAD_TREND_CHART_BOTTOM = 136
 
+    @staticmethod
+    def greeting_for_hour(hour):
+        if hour < 12:
+            return 'Good morning'
+        if hour < 17:
+            return 'Good afternoon'
+        return 'Good evening'
+
     def dispatch(self, request, *args, **kwargs):
         # A salesperson's command centre is their personal pipeline. Sending
         # them there keeps the default route focused rather than a cut-down
@@ -321,7 +329,9 @@ class DashboardView(TenantWebMixin, TemplateView):
         business = self.get_business()
         now = timezone.now()
         business_timezone = ZoneInfo(business.timezone)
-        today = timezone.localdate(now, timezone=business_timezone)
+        dashboard_now = timezone.localtime(now, timezone=business_timezone)
+        today = dashboard_now.date()
+        dashboard_greeting = self.greeting_for_hour(dashboard_now.hour)
         leads = self.visible_leads()
         active_leads = leads.exclude(stage__in=(Lead.Stage.WON, Lead.Stage.LOST))
         tasks = self.visible_tasks()
@@ -473,7 +483,8 @@ class DashboardView(TenantWebMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'today': today,
-            'dashboard_now': timezone.localtime(now, timezone=business_timezone),
+            'dashboard_now': dashboard_now,
+            'dashboard_greeting': dashboard_greeting,
             'due_today_count': open_tasks.filter(due_at__date=today).count(),
             'overdue_count': overdue_tasks.count(),
             'active_leads_count': active_count,
