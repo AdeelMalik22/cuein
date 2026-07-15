@@ -4,6 +4,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.models import TenantScopedModel, User
+from core.tenancy import belongs_to_business
 
 
 class Product(TenantScopedModel):
@@ -93,7 +94,10 @@ class Lead(TenantScopedModel):
         errors = {}
         if self.stage == self.Stage.LOST and not self.lost_reason.strip():
             errors['lost_reason'] = 'A lost lead requires a reason.'
-        if self.assigned_user_id and self.business_id and self.assigned_user.business_id != self.business_id:
+        if self.assigned_user_id and self.business_id and not belongs_to_business(
+            self.assigned_user_id,
+            self.business_id,
+        ):
             errors['assigned_user'] = 'The assigned user must belong to the same business.'
         if self.product_id and self.business_id and self.product.business_id != self.business_id:
             errors['product'] = 'The product must belong to the same business.'
@@ -142,7 +146,10 @@ class Activity(TenantScopedModel):
         errors = {}
         if self.business_id and self.lead_id and self.lead.business_id != self.business_id:
             errors['lead'] = 'The lead must belong to the same business.'
-        if self.business_id and self.created_by_id and self.created_by.business_id != self.business_id:
+        if self.business_id and self.created_by_id and not belongs_to_business(
+            self.created_by_id,
+            self.business_id,
+        ):
             errors['created_by'] = 'The activity author must belong to the same business.'
         if errors:
             raise ValidationError(errors)

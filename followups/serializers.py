@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from core.models import User
+from core.tenancy import active_business, is_active_member_of_business
 from leads.models import Lead
 
 from .models import FollowUpTask, Notification
@@ -22,14 +23,12 @@ class FollowUpTaskSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'status', 'rule_key', 'created_at', 'completed_at')
 
     def validate(self, attrs):
-        business = self.context['request'].user.business
+        business = active_business(self.context['request'])
         lead = attrs.get('lead', getattr(self.instance, 'lead', None))
         assignee = attrs.get('assigned_user', getattr(self.instance, 'assigned_user', None))
         if lead and lead.business_id != business.id:
             raise serializers.ValidationError({'lead': 'Select a lead from your business.'})
-        if assignee and assignee.business_id != business.id:
-            raise serializers.ValidationError({'assigned_user': 'Select a user from your business.'})
-        if assignee and not assignee.is_active:
+        if assignee and not is_active_member_of_business(assignee, business.id):
             raise serializers.ValidationError({'assigned_user': 'The assigned user must be active.'})
         return attrs
 

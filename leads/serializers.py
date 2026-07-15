@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.urls import reverse
 
 from core.models import User
+from core.tenancy import active_business, is_active_member_of_business
 
 from .models import Lead, Product
 
@@ -14,7 +15,7 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def validate_name(self, value):
         request = self.context['request']
-        products = Product.objects.for_business(request.user.business).filter(name__iexact=value)
+        products = Product.objects.for_business(active_business(request)).filter(name__iexact=value)
         if self.instance:
             products = products.exclude(pk=self.instance.pk)
         if products.exists():
@@ -52,7 +53,7 @@ class LeadSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context['request']
-        business = request.user.business
+        business = active_business(request)
 
         if 'stage' in self.initial_data or 'lost_reason' in self.initial_data:
             raise serializers.ValidationError(
@@ -64,9 +65,7 @@ class LeadSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'product': 'Select a product from your business.'})
 
         assigned_user = attrs.get('assigned_user')
-        if assigned_user and assigned_user.business_id != business.id:
-            raise serializers.ValidationError({'assigned_user': 'Select a user from your business.'})
-        if assigned_user and not assigned_user.is_active:
+        if assigned_user and not is_active_member_of_business(assigned_user, business.id):
             raise serializers.ValidationError({'assigned_user': 'The assigned user must be active.'})
         return attrs
 
@@ -117,8 +116,6 @@ class LeadAssignmentSerializer(serializers.Serializer):
 
     def validate_assigned_user(self, user):
         request = self.context['request']
-        if user.business_id != request.user.business_id:
-            raise serializers.ValidationError('Select a user from your business.')
-        if not user.is_active:
+        if not is_active_member_of_business(user, active_business(request).id):
             raise serializers.ValidationError('The assigned user must be active.')
         return user

@@ -12,7 +12,7 @@
       <p class="profile-summary-email">{{ request.user.email|default:request.user.username }}</p>
       <dl class="profile-facts">
         <div><dt>Workspace</dt><dd>{{ business.name }}</dd></div>
-        <div><dt>Role</dt><dd>{{ request.user.get_role_display }}</dd></div>
+        <div><dt>Role in {{ business.name }}</dt><dd>{{ active_membership.get_role_display }}</dd></div>
         <div><dt>Member since</dt><dd>{{ request.user.date_joined|date:'M j, Y' }}</dd></div>
       </dl>
     </aside>

@@ -10,6 +10,7 @@ from rest_framework.response import Response
 
 from core.models import User
 from core.permissions import IsBusinessManagerOrOwner
+from core.tenancy import active_business, active_role
 
 from .models import FollowUpTask, Notification
 from .serializers import (
@@ -28,30 +29,31 @@ class FollowUpTaskViewSet(viewsets.ModelViewSet):
     ordering = ('due_at',)
 
     def get_queryset(self):
-        queryset = FollowUpTask.objects.for_business(self.request.user.business).select_related('lead', 'assigned_user')
-        if self.request.user.role == User.Role.SALESPERSON:
+        business = active_business(self.request)
+        queryset = FollowUpTask.objects.for_business(business).select_related('lead', 'assigned_user')
+        if active_role(self.request) == User.Role.SALESPERSON:
             queryset = queryset.filter(assigned_user=self.request.user)
         status_value = self.request.query_params.get('status')
         if status_value:
             queryset = queryset.filter(status=status_value)
         if self.request.query_params.get('due') == 'today':
-            local_today = timezone.localdate(timezone=ZoneInfo(self.request.user.business.timezone))
+            local_today = timezone.localdate(timezone=ZoneInfo(business.timezone))
             queryset = queryset.filter(due_at__date=local_today)
         return queryset
 
     def perform_create(self, serializer):
         assignee = serializer.validated_data.get('assigned_user', self.request.user)
-        if self.request.user.role == User.Role.SALESPERSON:
+        if active_role(self.request) == User.Role.SALESPERSON:
             assignee = self.request.user
-        serializer.save(business=self.request.user.business, assigned_user=assignee)
+        serializer.save(business=active_business(self.request), assigned_user=assignee)
 
     def perform_update(self, serializer):
-        if self.request.user.role == User.Role.SALESPERSON and 'assigned_user' in self.request.data:
+        if active_role(self.request) == User.Role.SALESPERSON and 'assigned_user' in self.request.data:
             raise ValidationError({'assigned_user': 'Salespeople cannot reassign tasks.'})
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
-        if request.user.role == User.Role.SALESPERSON:
+        if active_role(request) == User.Role.SALESPERSON:
             return Response({'detail': 'Only an owner or manager can cancel a task.'}, status=status.HTTP_403_FORBIDDEN)
         task = self.get_object()
         task.status = FollowUpTask.Status.CANCELLED
@@ -98,7 +100,7 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = (IsAuthenticated,)
 
     def get_queryset(self):
-        return Notification.objects.for_business(self.request.user.business).filter(
+        return Notification.objects.for_business(active_business(self.request)).filter(
             recipient=self.request.user
         ).select_related('task', 'task__lead', 'task__assigned_user')
 

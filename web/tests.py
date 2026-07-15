@@ -253,7 +253,10 @@ class EmailVerificationTests(TestCase):
             {'email': 'owner@northstar.example', 'code': '123456'},
         )
 
-        self.assertRedirects(first_response, reverse('web:onboarding'))
+        # The client is deliberately logged out before this assertion, so do
+        # not follow the first response's protected onboarding redirect.
+        self.assertEqual(first_response.status_code, 302)
+        self.assertEqual(first_response.url, reverse('web:onboarding'))
         self.assertRedirects(response, reverse('web:email-verification-sent'))
         self.assertEqual(Business.objects.filter(name='North Star Solar').count(), 1)
 

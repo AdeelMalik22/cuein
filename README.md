@@ -9,7 +9,7 @@ The application has two first-class interfaces:
 
 ## What is implemented
 
-- Multi-tenant businesses with owner, manager, and salesperson roles.
+- Multi-tenant businesses with owner, manager, and salesperson roles, including per-business memberships and workspace switching for shared staff.
 - Email-confirmed business registration: no `Business` or owner `User` is created until the owner enters the expiring six-digit email code.
 - A seven-stage lead pipeline: New inquiry, Contacted, Site visit, Quotation sent, Negotiation, Won, and Lost.
 - Lead quick-add, search/filtering, assignment, editing, activity timeline, and validated lost reasons.
@@ -18,14 +18,19 @@ The application has two first-class interfaces:
 - Celery-backed follow-up scheduling plus overdue-task and stale-lead sweeps.
 - Owner/manager dashboard, source-conversion and stage analytics, reports, and responsive navigation with a collapsible desktop sidebar.
 
-## Multi-tenancy
+## Multi-tenancy and workspaces
 
 One running application serves independent businesses. Each `Business` is a tenant.
 
 - Every tenant-owned model has a required `business` relationship through `TenantScopedModel`.
-- API and web queries begin with the authenticated user’s business.
+- A global `User` can have one or more active `Membership` records. A membership carries that person's role for one business.
+- Web requests resolve the active workspace from a validated server-side session value. The sidebar switcher only lists active memberships and every switch is re-validated server-side.
+- JWTs are scoped to exactly one business. A person with multiple memberships must include `business_id` when requesting a token; the API never trusts a mutable client-supplied workspace header.
+- API and web queries begin with the resolved active business, not the legacy `User.business` compatibility field.
 - Related products, leads, tasks, and users are validated against the same business.
 - Cross-tenant object lookups return `404` rather than exposing another tenant’s data or object existence.
+
+The `User.business` and `User.role` fields remain temporarily for a safe production rollout. Running `migrate` performs an idempotent membership backfill; operators can also run `python3 manage.py backfill_memberships` to verify or repeat it safely.
 
 ## API overview
 
@@ -48,6 +53,16 @@ One running application serves independent businesses. Each `Business` is a tena
 | Notifications | `/api/v1/notifications/` |
 
 All API routes require JWT authentication except signup, email-code verification, token creation, and token refresh. API signup creates only a temporary pending registration and returns a verification-required response; the business, owner account, and JWT access become available only after the owner enters the emailed six-digit code.
+
+For an account with more than one workspace, obtain a token for a specific business:
+
+```json
+{
+  "username": "shared-user",
+  "password": "your-password",
+  "business_id": "workspace-uuid"
+}
+```
 
 ## Local setup
 

@@ -7,7 +7,7 @@ from .views import (
     LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageListView, LeadStageUpdateView,
     LeadUpdateView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ProfileView, ReportsView,
     SignupView, TaskCompleteView, TaskListView, TaskRescheduleView, TeamDeleteView, TeamEditView,
-    TeamListView,
+    TeamListView, WorkspaceSwitchView,
 )
 
 app_name = 'web'
@@ -20,6 +20,7 @@ urlpatterns = [
     path('verify-email/', EmailVerificationView.as_view(), name='email-verify'),
     path('login/', auth_views.LoginView.as_view(template_name='web/login.html'), name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
+    path('workspaces/switch/', WorkspaceSwitchView.as_view(), name='workspace-switch'),
     path('onboarding/', OnboardingView.as_view(), name='onboarding'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('leads/', LeadListView.as_view(), name='lead-list'),

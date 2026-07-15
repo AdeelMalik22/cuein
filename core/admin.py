@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Business, PendingRegistration, User
+from .models import Business, Membership, PendingRegistration, User
 
 
 @admin.register(Business)
@@ -20,6 +20,14 @@ class CueinUserAdmin(UserAdmin):
     readonly_fields = ('email_verified_at', 'email_verification_sent_at')
     list_display = ('username', 'email', 'business', 'role', 'email_verified_at', 'is_staff', 'is_active')
     list_filter = ('role', 'business', 'is_staff', 'is_active')
+
+
+@admin.register(Membership)
+class MembershipAdmin(admin.ModelAdmin):
+    list_display = ('user', 'business', 'role', 'is_active', 'joined_at')
+    list_filter = ('role', 'is_active', 'business')
+    search_fields = ('user__username', 'user__email', 'business__name')
+    autocomplete_fields = ('user', 'business')
 
 
 @admin.register(PendingRegistration)

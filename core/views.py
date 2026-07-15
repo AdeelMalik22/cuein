@@ -5,15 +5,15 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
 
+from .authentication import select_token_membership, token_pair_for_membership
 from .email_verification import (
     activate_pending_registration,
     EmailVerificationDeliveryError,
     EmailVerificationError,
     send_email_verification,
 )
-from .models import Business, PendingRegistration, User
+from .models import Membership, PendingRegistration, User
 from .permissions import IsBusinessOwner
 from .serializers import (
     BusinessSerializer,
@@ -23,6 +23,7 @@ from .serializers import (
     TeamUserSerializer,
     VerifyEmailCodeSerializer,
 )
+from .tenancy import active_business, active_role, users_for_business
 
 
 class CurrentUserView(APIView):
@@ -31,7 +32,7 @@ class CurrentUserView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request):
-        return Response(CurrentUserSerializer(request.user).data)
+        return Response(CurrentUserSerializer(request.user, context={'request': request}).data)
 
 
 class SignupView(APIView):
@@ -84,12 +85,11 @@ class VerifyEmailCodeView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        refresh = RefreshToken.for_user(user)
+        membership = select_token_membership(user)
         return Response(
             {
-                'user': CurrentUserSerializer(user).data,
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
+                'user': CurrentUserSerializer(user, context={'membership': membership}).data,
+                **token_pair_for_membership(user, membership),
             },
             status=status.HTTP_201_CREATED,
         )
@@ -123,13 +123,13 @@ class CurrentBusinessView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get_business(self, request):
-        return get_object_or_404(Business, pk=request.user.business_id, is_active=True)
+        return active_business(request)
 
     def get(self, request):
         return Response(BusinessSerializer(self.get_business(request)).data)
 
     def patch(self, request):
-        if request.user.role != User.Role.OWNER:
+        if active_role(request) != User.Role.OWNER:
             return Response(
                 {'detail': 'Only a business owner can update business settings.'},
                 status=status.HTTP_403_FORBIDDEN,
@@ -147,21 +147,30 @@ class TeamUserViewSet(viewsets.ModelViewSet):
     permission_classes = (IsBusinessOwner,)
 
     def get_queryset(self):
-        return User.objects.filter(business=self.request.user.business).order_by('id')
+        return users_for_business(active_business(self.request)).order_by('id')
 
     def perform_create(self, serializer):
-        serializer.save(business=self.request.user.business)
+        serializer.save(business=active_business(self.request))
 
     def perform_destroy(self, instance):
         if instance.pk == self.request.user.pk:
             raise ValidationError({'detail': 'You cannot delete your own account.'})
+        membership = get_object_or_404(
+            Membership,
+            user=instance,
+            business=active_business(self.request),
+        )
         if (
-            instance.role == User.Role.OWNER
-            and User.objects.filter(
-                business=instance.business,
+            membership.role == User.Role.OWNER
+            and membership.is_active
+            and Membership.objects.filter(
+                business=membership.business,
                 role=User.Role.OWNER,
                 is_active=True,
+                user__is_active=True,
             ).count() == 1
         ):
             raise ValidationError({'detail': 'A business must keep at least one active owner.'})
-        instance.delete()
+        # Removing a person from one workspace must never delete their global
+        # login or their memberships in other businesses.
+        membership.delete()

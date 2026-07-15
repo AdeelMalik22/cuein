@@ -2,7 +2,8 @@ from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
-from .models import Business, PendingRegistration, User
+from .models import Business, Membership, PendingRegistration, User
+from .tenancy import active_business, default_active_membership_for, request_membership
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -12,16 +13,57 @@ class BusinessSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'is_active', 'created_at')
 
 
-class CurrentUserSerializer(serializers.ModelSerializer):
+class WorkspaceMembershipSerializer(serializers.ModelSerializer):
     business = BusinessSerializer(read_only=True)
 
     class Meta:
+        model = Membership
+        fields = ('id', 'business', 'role', 'is_active', 'joined_at')
+        read_only_fields = fields
+
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    business = serializers.SerializerMethodField()
+    role = serializers.SerializerMethodField()
+    memberships = serializers.SerializerMethodField()
+
+    def _active_membership(self, user):
+        membership = self.context.get('membership')
+        if membership is not None:
+            return membership
+        request = self.context.get('request')
+        if request is not None:
+            return request_membership(request)
+        return default_active_membership_for(user)
+
+    def get_business(self, user):
+        membership = self._active_membership(user)
+        return BusinessSerializer(membership.business).data if membership else None
+
+    def get_role(self, user):
+        membership = self._active_membership(user)
+        return membership.role if membership else None
+
+    def get_memberships(self, user):
+        memberships = Membership.objects.filter(
+            user=user,
+            is_active=True,
+            business__is_active=True,
+        ).select_related('business').order_by('joined_at', 'id')
+        return WorkspaceMembershipSerializer(memberships, many=True).data
+
+    class Meta:
         model = User
-        fields = ('id', 'username', 'first_name', 'last_name', 'email', 'phone', 'profile_picture', 'role', 'business')
+        fields = (
+            'id', 'username', 'first_name', 'last_name', 'email', 'phone',
+            'profile_picture', 'role', 'business', 'memberships',
+        )
 
 
 class TeamUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
+    role = serializers.ChoiceField(choices=User.Role.choices, required=False)
+    is_active = serializers.BooleanField(required=False)
 
     class Meta:
         model = User
@@ -35,29 +77,85 @@ class TeamUserSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if not self.instance and not attrs.get('password'):
             raise serializers.ValidationError({'password': 'This field is required when creating a user.'})
-        if self.instance and self.instance.role == User.Role.OWNER:
-            new_role = attrs.get('role', self.instance.role)
-            owner_count = User.objects.filter(
-                business=self.instance.business,
-                role=User.Role.OWNER,
-                is_active=True,
-            ).count()
-            if new_role != User.Role.OWNER and owner_count == 1:
-                raise serializers.ValidationError({'role': 'A business must keep at least one active owner.'})
+        if self.instance:
+            business = active_business(self.context['request'])
+            membership = Membership.objects.get(user=self.instance, business=business)
+            new_role = attrs.get('role', membership.role)
+            new_is_active = attrs.get('is_active', membership.is_active)
+            if membership.role == User.Role.OWNER and membership.is_active and (
+                new_role != User.Role.OWNER or not new_is_active
+            ):
+                owner_count = Membership.objects.filter(
+                    business=business,
+                    role=User.Role.OWNER,
+                    is_active=True,
+                    user__is_active=True,
+                ).count()
+                if owner_count == 1:
+                    raise serializers.ValidationError({'role': 'A business must keep at least one active owner.'})
         return attrs
 
     def create(self, validated_data):
+        business = validated_data.pop('business')
         password = validated_data.pop('password')
-        return User.objects.create_user(password=password, **validated_data)
+        role = validated_data.pop('role', User.Role.SALESPERSON)
+        membership_is_active = validated_data.pop('is_active', True)
+        # Populate the legacy fields for a brand-new account too.  They are
+        # not used for authorization, but keep older integrations functional
+        # until the bridge can be removed in a later migration.
+        user = User.objects.create_user(
+            password=password,
+            business=business,
+            role=role,
+            is_active=True,
+            **validated_data,
+        )
+        Membership.objects.create(
+            user=user,
+            business=business,
+            role=role,
+            is_active=membership_is_active,
+        )
+        return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
+        role = validated_data.pop('role', None)
+        membership_is_active = validated_data.pop('is_active', None)
         for attribute, value in validated_data.items():
             setattr(instance, attribute, value)
         if password:
             instance.set_password(password)
+        if membership_is_active is True:
+            # Preserve the old reactivation behavior while membership status
+            # becomes workspace-scoped.  Deactivating one membership never
+            # disables a person's other workspaces.
+            instance.is_active = True
         instance.save()
+        membership = Membership.objects.get(
+            user=instance,
+            business=active_business(self.context['request']),
+        )
+        update_fields = []
+        if role is not None:
+            membership.role = role
+            update_fields.append('role')
+        if membership_is_active is not None:
+            membership.is_active = membership_is_active
+            update_fields.append('is_active')
+        if update_fields:
+            membership.save(update_fields=update_fields)
         return instance
+
+    def to_representation(self, instance):
+        representation = super().to_representation(instance)
+        membership = Membership.objects.get(
+            user=instance,
+            business=active_business(self.context['request']),
+        )
+        representation['role'] = membership.role
+        representation['is_active'] = membership.is_active
+        return representation
 
 
 class SignupSerializer(serializers.Serializer):

@@ -263,6 +263,125 @@ svg {
     letter-spacing: -.07em;
 }
 
+.workspace-switcher {
+    margin: -1.25rem .25rem 1.35rem;
+    position: relative;
+}
+
+.workspace-switcher > summary {
+    align-items: center;
+    border: 1px solid #383836;
+    border-radius: .7rem;
+    color: var(--paper);
+    cursor: pointer;
+    display: grid;
+    gap: .08rem .45rem;
+    grid-template-columns: 1fr auto;
+    min-height: 54px;
+    padding: .6rem .7rem;
+    list-style: none;
+}
+
+.workspace-switcher > summary::-webkit-details-marker {
+    display: none;
+}
+
+.workspace-switcher > summary:hover,
+.workspace-switcher[open] > summary {
+    background: #292928;
+    border-color: #4b4b48;
+}
+
+.workspace-switcher-label {
+    color: #aeadab;
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+.workspace-switcher > summary strong {
+    font-size: .78rem;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workspace-switcher > summary svg {
+    grid-row: 1 / span 2;
+    height: 16px;
+    transition: transform .18s ease;
+    width: 16px;
+}
+
+.workspace-switcher[open] > summary svg {
+    transform: rotate(180deg);
+}
+
+.workspace-switcher-panel {
+    background: #242423;
+    border: 1px solid #444440;
+    border-radius: .75rem;
+    box-shadow: 0 16px 30px rgba(0, 0, 0, .24);
+    display: grid;
+    gap: .2rem;
+    left: 0;
+    padding: .45rem;
+    position: absolute;
+    right: 0;
+    top: calc(100% + .4rem);
+    z-index: 35;
+}
+
+.workspace-switcher-panel > p {
+    color: #aaa9a5;
+    font-size: .66rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    padding: .3rem .4rem .25rem;
+    text-transform: uppercase;
+}
+
+.workspace-switcher-option {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: .5rem;
+    color: #e8e8e5;
+    display: flex;
+    justify-content: space-between;
+    padding: .58rem .55rem;
+    text-align: left;
+    width: 100%;
+}
+
+.workspace-switcher-option:hover,
+.workspace-switcher-option.is-active {
+    background: #363634;
+}
+
+.workspace-switcher-option strong,
+.workspace-switcher-option small {
+    display: block;
+}
+
+.workspace-switcher-option strong {
+    font-size: .76rem;
+}
+
+.workspace-switcher-option small {
+    color: #aaa9a5;
+    font-size: .67rem;
+    margin-top: .08rem;
+}
+
+.workspace-switcher-check {
+    color: #f0c1b6;
+    font-size: .85rem;
+    font-weight: 700;
+}
+
 .primary-nav {
     display: grid;
     gap: .26rem;
