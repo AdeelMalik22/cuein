@@ -326,6 +326,23 @@
     });
   }
 
+  // Delegate this at script-load time instead of wiring each button during
+  // page setup. A toast can then always be dismissed even if another optional
+  // enhancement on the page fails to initialize.
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    var button = target && typeof target.closest === "function"
+      ? target.closest("[data-flash-dismiss]")
+      : null;
+    if (!button) return;
+
+    var message = button.closest("[data-flash-message]");
+    if (message) {
+      event.preventDefault();
+      message.remove();
+    }
+  });
+
   function setUpLiveClocks() {
     document.querySelectorAll("[data-live-clock]").forEach(function (clock) {
       var options = {
