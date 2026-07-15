@@ -1700,7 +1700,8 @@ input::placeholder, textarea::placeholder {
     gap: .38rem;
 }
 
-.field > span {
+.field > span:first-child,
+.field > label {
     color: var(--ink-soft);
     font-size: .73rem;
     font-weight: 700;
@@ -3124,6 +3125,66 @@ input::placeholder, textarea::placeholder {
 
 .auth-form-single {
     grid-template-columns: 1fr;
+}
+
+.password-input {
+    display: block;
+    position: relative;
+}
+
+.password-input input {
+    padding-right: 3rem;
+}
+
+.password-toggle {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: .4rem;
+    color: var(--muted);
+    display: inline-flex;
+    height: 34px;
+    justify-content: center;
+    padding: 0;
+    position: absolute;
+    right: .35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: background .16s ease, color .16s ease;
+    width: 34px;
+}
+
+.password-toggle:hover {
+    background: var(--surface-muted);
+    color: var(--ink);
+}
+
+.password-toggle:focus-visible {
+    outline: 3px solid rgba(196, 80, 56, .28);
+    outline-offset: 1px;
+}
+
+.password-toggle svg {
+    fill: none;
+    height: 19px;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+    width: 19px;
+}
+
+.password-toggle [data-password-icon="hide"],
+.password-toggle[aria-pressed="true"] [data-password-icon="show"] {
+    display: none;
+}
+
+.password-toggle[aria-pressed="true"] [data-password-icon="hide"] {
+    display: block;
+}
+
+.login-credentials-error {
+    line-height: 1.45;
 }
 
 /* Verification code experience */
