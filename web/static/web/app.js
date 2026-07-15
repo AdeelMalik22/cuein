@@ -409,7 +409,22 @@
     syncSidebar();
   }
 
+  function setUpPasswordToggles() {
+    document.querySelectorAll("[data-password-toggle]").forEach(function (toggle) {
+      var input = document.getElementById(toggle.getAttribute("aria-controls"));
+      if (!input) return;
+
+      toggle.addEventListener("click", function () {
+        var shouldShowPassword = input.type === "password";
+        input.type = shouldShowPassword ? "text" : "password";
+        toggle.setAttribute("aria-pressed", String(shouldShowPassword));
+        toggle.setAttribute("aria-label", shouldShowPassword ? "Hide password" : "Show password");
+      });
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    setUpPasswordToggles();
     setUpKanban();
     setUpStageForm();
     setUpAssigneeDropdowns();

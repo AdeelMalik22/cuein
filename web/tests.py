@@ -6,7 +6,7 @@ from datetime import timedelta
 from django.contrib.auth.hashers import make_password
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -19,6 +19,38 @@ from leads.models import Lead, Product
 ONE_PIXEL_PNG = base64.b64decode(
     'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGM8EmDBwMDAxMDAwMDAAAAQRgFQfoqMXQAAAABJRU5ErkJggg=='
 )
+
+
+class RejectingAuthenticationBackend:
+    def authenticate(self, request, **credentials):
+        return None
+
+    def get_user(self, user_id):
+        return None
+
+
+class LoginPageTests(SimpleTestCase):
+    def test_password_field_has_an_accessible_visibility_toggle(self):
+        response = self.client.get(reverse('web:login'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<label for="login-password">Password</label>', html=True)
+        self.assertContains(response, 'id="login-password"')
+        self.assertContains(response, 'data-password-toggle')
+        self.assertContains(response, 'aria-controls="login-password"')
+        self.assertContains(response, 'aria-label="Show password"')
+        self.assertContains(response, 'web/app.js')
+
+    @override_settings(AUTHENTICATION_BACKENDS=('web.tests.RejectingAuthenticationBackend',))
+    def test_invalid_credentials_error_is_below_the_password_field(self):
+        response = self.client.post(reverse('web:login'), {'username': 'wrong', 'password': 'wrong'})
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="login-credentials-error"')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-describedby="login-credentials-error"', count=2)
+        self.assertLess(content.index('id="login-password"'), content.index('id="login-credentials-error"'))
 
 
 class ProfileAndAvatarTests(TestCase):
