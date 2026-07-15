@@ -25,6 +25,10 @@ class AvatarRadioSelect(forms.RadioSelect):
             account = getattr(self, 'empty_choice_user', None)
 
         option['attrs']['class'] = 'assignee-dropdown-input'
+        # The custom widget supplies the clickable label and visible option
+        # content itself.  Django's stock radio option template would add a
+        # second label around the input, which is invalid nested markup.
+        option['wrap_label'] = False
         option['is_empty_choice'] = is_empty_choice
         option['avatar_url'] = ''
         option['display_name'] = str(label)

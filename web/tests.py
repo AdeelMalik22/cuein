@@ -99,6 +99,10 @@ class ProfileAndAvatarTests(TestCase):
         self.assertContains(response, 'Sara Brown')
         self.assertContains(response, 'profile_pictures/sara.png')
         self.assertContains(response, 'default-profile-avatar.svg')
+        self.assertContains(
+            response,
+            f'name="assigned_user" value="{self.teammate.pk}"',
+        )
         self.assertContains(response, reverse('web:team-list'))
         self.assertContains(response, reverse('web:product-list'))
         self.assertContains(response, reverse('web:business-settings'))
