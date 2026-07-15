@@ -228,6 +228,9 @@ class DashboardAnalyticsTests(TestCase):
         self.assertContains(response, 'See the shape of your pipeline.')
         self.assertContains(response, 'New leads over time')
         self.assertContains(response, 'lead-trend-chart')
+        self.assertContains(response, 'data-lead-trend-point')
+        self.assertContains(response, 'data-lead-trend-tooltip')
+        self.assertNotContains(response, '<title id="lead-trend-chart-title">')
         self.assertContains(response, 'data-live-clock')
         self.assertContains(response, 'data-sidebar-toggle')
 

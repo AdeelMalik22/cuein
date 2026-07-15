@@ -326,6 +326,83 @@
     });
   }
 
+  function setUpLeadTrendTooltips() {
+    document.querySelectorAll("[data-lead-trend-chart]").forEach(function (chart) {
+      var tooltip = chart.querySelector("[data-lead-trend-tooltip]");
+      var primary = chart.querySelector("[data-lead-trend-tooltip-primary]");
+      var deltaLine = chart.querySelector("[data-lead-trend-tooltip-delta]");
+      var points = Array.prototype.slice.call(chart.querySelectorAll("[data-lead-trend-point]"));
+      var activePoint = null;
+      if (!tooltip || !primary || !deltaLine || !points.length) return;
+
+      function leadLabel(count) {
+        return count + " new lead" + (count === 1 ? "" : "s");
+      }
+
+      function hideTooltip() {
+        if (activePoint) activePoint.classList.remove("is-active");
+        activePoint = null;
+        tooltip.hidden = true;
+      }
+
+      function positionTooltip(point) {
+        var chartRect = chart.getBoundingClientRect();
+        var pointRect = point.getBoundingClientRect();
+        var padding = 8;
+        var left = pointRect.left - chartRect.left - (tooltip.offsetWidth / 2);
+        var maxLeft = Math.max(padding, chart.clientWidth - tooltip.offsetWidth - padding);
+        var above = pointRect.top - chartRect.top - tooltip.offsetHeight - 14;
+        var top = above < padding
+          ? Math.min(chart.clientHeight - tooltip.offsetHeight - padding, pointRect.bottom - chartRect.top + 14)
+          : above;
+
+        tooltip.style.left = Math.max(padding, Math.min(left, maxLeft)) + "px";
+        tooltip.style.top = Math.max(padding, top) + "px";
+      }
+
+      function showTooltip(point) {
+        var pointIndex = points.indexOf(point);
+        var count = Number(point.dataset.count);
+        var date = point.dataset.date || "Selected day";
+        if (pointIndex < 0 || Number.isNaN(count)) return;
+
+        if (activePoint && activePoint !== point) activePoint.classList.remove("is-active");
+        activePoint = point;
+        activePoint.classList.add("is-active");
+        primary.textContent = date + " — " + leadLabel(count);
+
+        if (pointIndex === 0) {
+          deltaLine.hidden = true;
+        } else {
+          var previousPoint = points[pointIndex - 1];
+          var previousCount = Number(previousPoint.dataset.count);
+          var delta = count - previousCount;
+          var sign = delta > 0 ? "+" : "";
+          deltaLine.hidden = false;
+          deltaLine.textContent = sign + delta + " vs. " + (previousPoint.dataset.date || "previous day");
+        }
+
+        tooltip.hidden = false;
+        positionTooltip(point);
+      }
+
+      points.forEach(function (point) {
+        point.addEventListener("mouseenter", function () { showTooltip(point); });
+        point.addEventListener("focus", function () { showTooltip(point); });
+        point.addEventListener("click", function () { showTooltip(point); });
+        point.addEventListener("blur", function () {
+          window.setTimeout(function () {
+            if (!chart.contains(document.activeElement)) hideTooltip();
+          }, 0);
+        });
+      });
+
+      chart.addEventListener("mouseleave", function () {
+        if (!chart.contains(document.activeElement)) hideTooltip();
+      });
+    });
+  }
+
   // Delegate this at script-load time instead of wiring each button during
   // page setup. A toast can then always be dismissed even if another optional
   // enhancement on the page fails to initialize.
@@ -428,6 +505,7 @@
     setUpKanban();
     setUpStageForm();
     setUpAssigneeDropdowns();
+    setUpLeadTrendTooltips();
     setUpLiveClocks();
     setUpSidebarToggle();
   });
