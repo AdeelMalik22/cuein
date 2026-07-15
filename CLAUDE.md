@@ -22,7 +22,6 @@ core/           Business tenant, custom User, auth/team APIs, permissions
 leads/          Product, Lead, Activity models and tenant-scoped APIs
 followups/      Follow-up tasks, notifications, rules, services, Celery tasks
 web/            Server-rendered workspace views, templates, CSS, and JS
-seed.py         Generic seed plus targeted Smith LLC dashboard demo data
 plan.md         Delivery plan and current implementation status
 understanding.md  Multi-business architecture and request-flow guide
 PRD-FollowUpCRM.md  Product requirements
@@ -41,8 +40,6 @@ python3.10 manage.py runserver
 ```
 
 The local PostgreSQL connection values belong in the root `.env` file. Do not commit `.env` or copy its secrets into source code, docs, or logs.
-
-For demo data, `python3.10 seed.py --smith-llc-demo` adds an idempotent batch of 2,000 realistic leads to the existing `Smith LLC` tenant only. Do not run `seed.py` without this flag when you only need the Smith LLC data: the legacy default seed creates new sample businesses.
 
 ## Tenant and workspace rules — non-negotiable
 

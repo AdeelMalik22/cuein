@@ -127,22 +127,6 @@ For an account with more than one workspace, obtain a token for a specific busin
 
    Celery uses `redis://127.0.0.1:6379/0` by default. Override `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` in `.env` when Redis runs elsewhere.
 
-## Development data
-
-The legacy command below creates new sample businesses:
-
-```bash
-python3.10 seed.py
-```
-
-To populate the existing `Smith LLC` tenant only, use the targeted and idempotent command:
-
-```bash
-python3.10 seed.py --smith-llc-demo
-```
-
-On its first run, it adds 2,000 realistic leads, activities, and a mix of upcoming, overdue, completed, and cancelled follow-up tasks. Re-running it does not duplicate that batch.
-
 ## Important development rule
 
 Never hand-write a Django migration. After model changes, generate it with:

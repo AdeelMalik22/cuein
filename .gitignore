@@ -1,5 +1,6 @@
 # Local configuration and secrets
 .env
+seeded_credentials.md
 
 # Python
 __pycache__/
