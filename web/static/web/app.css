@@ -2578,6 +2578,38 @@ input::placeholder, textarea::placeholder {
     pointer-events: none;
 }
 
+.report-quote-background {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(1rem, 3.5vw, 3.8rem);
+    position: relative;
+}
+
+.report-quote-background .eyebrow, .report-quote-background blockquote, .report-quote-background .report-quote-copy {
+    position: relative;
+    z-index: 1;
+}
+
+.report-quote-background blockquote {
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(3.1rem, 5vw, 5.8rem);
+    letter-spacing: -.07em;
+    line-height: .98;
+    margin: .45rem 0 0;
+    max-width: 720px;
+}
+
+.report-quote-copy {
+    color: var(--muted);
+    font-size: .92rem;
+    line-height: 1.55;
+    margin-top: 1.35rem;
+    max-width: 380px;
+}
+
 .lost-reasons-panel {
     grid-column: 1 / -1;
 }
