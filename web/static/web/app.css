@@ -1077,6 +1077,73 @@ a.nav-item:hover, .nav-item:hover, .nav-item.active {
     height: 100%;
 }
 
+.lead-trend-chart {
+    margin: .15rem -.25rem 0;
+    min-width: 0;
+}
+
+.lead-trend-chart svg {
+    height: 218px;
+    overflow: visible;
+    width: 100%;
+}
+
+.lead-trend-gridline {
+    stroke: var(--line);
+    stroke-width: 1;
+}
+
+.lead-trend-gridline.is-baseline {
+    stroke: var(--line-dark);
+}
+
+.lead-trend-grid-label, .lead-trend-axis-label {
+    fill: var(--muted);
+    font-family: var(--sans);
+    font-size: 10px;
+    letter-spacing: .02em;
+    stroke: none;
+}
+
+.lead-trend-axis-label {
+    font-size: 10.5px;
+}
+
+.lead-trend-area {
+    fill: url(#lead-trend-fill);
+    stroke: none;
+}
+
+.lead-trend-line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3;
+}
+
+.lead-trend-dot {
+    fill: var(--surface);
+    stroke: var(--accent);
+    stroke-width: 2.4;
+    transition: r .18s ease, fill .18s ease;
+}
+
+.lead-trend-dot:hover {
+    fill: var(--accent);
+    r: 5;
+}
+
+.lead-trend-footnote {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .3rem;
+    justify-content: space-between;
+}
+
+.lead-trend-footnote .quiet-link {
+    font-size: inherit;
+}
+
 .overview-grid {
     display: grid;
     gap: .85rem;
@@ -1084,7 +1151,7 @@ a.nav-item:hover, .nav-item:hover, .nav-item.active {
     margin-top: .85rem;
 }
 
-.priority-panel, .recent-panel {
+.priority-panel, .lead-trend-panel, .recent-panel {
     grid-column: 1 / 2;
 }
 
@@ -3452,7 +3519,7 @@ input::placeholder, textarea::placeholder {
         grid-template-columns: 1fr;
     }
 
-    .priority-panel, .pipeline-panel, .team-panel, .watch-panel, .recent-panel {
+    .priority-panel, .pipeline-panel, .lead-trend-panel, .team-panel, .watch-panel, .recent-panel {
         grid-column: auto;
     }
 
