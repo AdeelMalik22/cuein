@@ -244,6 +244,60 @@ class DashboardAnalyticsTests(TestCase):
         self.assertEqual(DashboardView.greeting_for_hour(18), 'Good evening')
 
 
+class ReportsSalespersonPaginationTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='owner',
+            password='test-password',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        self.client.force_login(self.owner)
+
+    def test_salespeople_are_ranked_by_conversion_and_shown_ten_at_a_time(self):
+        for salesperson_number in range(12):
+            salesperson = User.objects.create_user(
+                username=f'agent-{salesperson_number}',
+                first_name='Agent',
+                last_name=str(salesperson_number),
+                password='test-password',
+                business=self.business,
+                role=User.Role.SALESPERSON,
+            )
+            for lead_number in range(12):
+                Lead.objects.create(
+                    business=self.business,
+                    customer_name=f'Customer {salesperson_number}-{lead_number}',
+                    phone=f'03{salesperson_number:02d}{lead_number:07d}',
+                    assigned_user=salesperson,
+                    stage=Lead.Stage.WON if lead_number < salesperson_number else Lead.Stage.NEW_INQUIRY,
+                    closed_at=timezone.now() if lead_number < salesperson_number else None,
+                )
+
+        response = self.client.get(reverse('web:reports'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['salesperson_total_count'], 12)
+        self.assertEqual(response.context['salesperson_visible_count'], 10)
+        self.assertTrue(response.context['salesperson_has_more'])
+        self.assertEqual(response.context['salesperson_more_count'], 2)
+        self.assertEqual(
+            [row['label'] for row in response.context['salesperson_rows']],
+            [f'Agent {number}' for number in range(11, 1, -1)],
+        )
+        self.assertContains(response, 'Showing 10 of 12 salespeople')
+        self.assertContains(response, '?salespeople_limit=12#salesperson-conversion')
+
+        expanded_response = self.client.get(reverse('web:reports'), {'salespeople_limit': 20})
+
+        self.assertEqual(expanded_response.context['salesperson_visible_count'], 12)
+        self.assertFalse(expanded_response.context['salesperson_has_more'])
+        self.assertTrue(expanded_response.context['salesperson_can_collapse'])
+        self.assertEqual(len(expanded_response.context['salesperson_rows']), 12)
+        self.assertContains(expanded_response, '?salespeople_limit=10#salesperson-conversion')
+
+
 class EmailVerificationTests(TestCase):
     def setUp(self):
         self.registration = PendingRegistration.objects.create(

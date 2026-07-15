@@ -403,6 +403,48 @@
     });
   }
 
+  function setUpSalespersonReportLoadMore() {
+    function bindReport(report) {
+      report.addEventListener("click", function (event) {
+        var action = event.target.closest("[data-salesperson-page-action]");
+        if (!action || !report.contains(action) || action.dataset.loading === "true") return;
+
+        event.preventDefault();
+        var url = action.href;
+        action.dataset.loading = "true";
+        action.classList.add("is-loading");
+        action.setAttribute("aria-busy", "true");
+
+        fetch(url, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          credentials: "same-origin"
+        }).then(function (response) {
+          if (!response.ok) throw new Error("salesperson report failed");
+          return response.text();
+        }).then(function (html) {
+          var documentFragment = new DOMParser().parseFromString(html, "text/html");
+          var updatedReport = documentFragment.querySelector("[data-salesperson-report]");
+          if (!updatedReport) throw new Error("invalid salesperson report");
+
+          report.replaceWith(updatedReport);
+          bindReport(updatedReport);
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, "", url);
+          }
+          var updatedAction = updatedReport.querySelector("[data-salesperson-page-action]");
+          if (updatedAction) updatedAction.focus();
+        }).catch(function () {
+          delete action.dataset.loading;
+          action.classList.remove("is-loading");
+          action.removeAttribute("aria-busy");
+          notice("Cuein could not load more salespeople. Please try again.");
+        });
+      });
+    }
+
+    document.querySelectorAll("[data-salesperson-report]").forEach(bindReport);
+  }
+
   // Delegate this at script-load time instead of wiring each button during
   // page setup. A toast can then always be dismissed even if another optional
   // enhancement on the page fails to initialize.
@@ -544,6 +586,7 @@
     setUpStageForm();
     setUpAssigneeDropdowns();
     setUpLeadTrendTooltips();
+    setUpSalespersonReportLoadMore();
     setUpLiveClocks();
     setUpDashboardGreetings();
     setUpSidebarToggle();
