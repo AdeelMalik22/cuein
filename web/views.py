@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -9,6 +9,7 @@ from django.contrib.auth import login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
+from django.db.models.functions import TruncDate
 from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -297,6 +298,12 @@ class OnboardingView(OwnerRequiredMixin, TemplateView):
 class DashboardView(TenantWebMixin, TemplateView):
     template_name = 'web/dashboard.html'
     TEAM_ATTENTION_LIMIT = 5
+    LEAD_TREND_DAYS = 14
+    LEAD_TREND_CHART_WIDTH = 560
+    LEAD_TREND_CHART_LEFT = 32
+    LEAD_TREND_CHART_RIGHT = 14
+    LEAD_TREND_CHART_TOP = 18
+    LEAD_TREND_CHART_BOTTOM = 136
 
     def dispatch(self, request, *args, **kwargs):
         # A salesperson's command centre is their personal pipeline. Sending
@@ -313,7 +320,8 @@ class DashboardView(TenantWebMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         business = self.get_business()
         now = timezone.now()
-        today = timezone.localdate(now, timezone=ZoneInfo(business.timezone))
+        business_timezone = ZoneInfo(business.timezone)
+        today = timezone.localdate(now, timezone=business_timezone)
         leads = self.visible_leads()
         active_leads = leads.exclude(stage__in=(Lead.Stage.WON, Lead.Stage.LOST))
         tasks = self.visible_tasks()
@@ -385,6 +393,57 @@ class DashboardView(TenantWebMixin, TemplateView):
             row['conversion'] = round(row['won'] * 100 / row['total']) if row['total'] else 0
             row['width'] = row['conversion']
 
+        # The dashboard needs a short, useful sense of momentum without
+        # leaking another workspace's data. Build the series from the same
+        # visible, tenant-scoped lead queryset as the other dashboard cards.
+        lead_trend_start_date = today - timedelta(days=self.LEAD_TREND_DAYS - 1)
+        lead_trend_start = timezone.make_aware(
+            datetime.combine(lead_trend_start_date, time.min),
+            timezone=business_timezone,
+        )
+        lead_trend_totals = {
+            row['day']: row['total']
+            for row in leads.filter(created_at__gte=lead_trend_start).annotate(
+                day=TruncDate('created_at', tzinfo=business_timezone),
+            ).values('day').annotate(total=Count('id'))
+        }
+        lead_trend_counts = [
+            lead_trend_totals.get(lead_trend_start_date + timedelta(days=offset), 0)
+            for offset in range(self.LEAD_TREND_DAYS)
+        ]
+        lead_trend_scale = max(max(lead_trend_counts, default=0), 4)
+        chart_plot_width = self.LEAD_TREND_CHART_WIDTH - self.LEAD_TREND_CHART_LEFT - self.LEAD_TREND_CHART_RIGHT
+        chart_plot_height = self.LEAD_TREND_CHART_BOTTOM - self.LEAD_TREND_CHART_TOP
+        lead_trend_days = []
+        for offset, total in enumerate(lead_trend_counts):
+            day = lead_trend_start_date + timedelta(days=offset)
+            x = self.LEAD_TREND_CHART_LEFT + (chart_plot_width * offset / (self.LEAD_TREND_DAYS - 1))
+            y = self.LEAD_TREND_CHART_BOTTOM - (chart_plot_height * total / lead_trend_scale)
+            lead_trend_days.append({
+                'count': total,
+                'label': day.strftime('%b %d'),
+                'short_label': day.strftime('%b %d').replace(' 0', ' '),
+                'x': f'{x:.1f}',
+                'y': f'{y:.1f}',
+                'show_label': offset in (0, 4, 9, self.LEAD_TREND_DAYS - 1),
+            })
+        lead_trend_points = ' '.join(f"{day['x']},{day['y']}" for day in lead_trend_days)
+        lead_trend_area_points = (
+            f"{lead_trend_days[0]['x']},{self.LEAD_TREND_CHART_BOTTOM} "
+            f"{lead_trend_points} "
+            f"{lead_trend_days[-1]['x']},{self.LEAD_TREND_CHART_BOTTOM}"
+        )
+        lead_trend_grid_lines = [
+            {'y': self.LEAD_TREND_CHART_TOP, 'label': lead_trend_scale},
+            {
+                'y': (self.LEAD_TREND_CHART_TOP + self.LEAD_TREND_CHART_BOTTOM) / 2,
+                'label': lead_trend_scale // 2,
+            },
+            {'y': self.LEAD_TREND_CHART_BOTTOM, 'label': 0},
+        ]
+        lead_trend_total = sum(lead_trend_counts)
+        lead_trend_peak = max(lead_trend_days, key=lambda day: day['count'])
+
         closed_count = stage_totals.get(Lead.Stage.WON, 0) + stage_totals.get(Lead.Stage.LOST, 0)
         win_rate = round(stage_totals.get(Lead.Stage.WON, 0) * 100 / closed_count) if closed_count else 0
 
@@ -414,7 +473,7 @@ class DashboardView(TenantWebMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'today': today,
-            'dashboard_now': timezone.localtime(now, timezone=ZoneInfo(business.timezone)),
+            'dashboard_now': timezone.localtime(now, timezone=business_timezone),
             'due_today_count': open_tasks.filter(due_at__date=today).count(),
             'overdue_count': overdue_tasks.count(),
             'active_leads_count': active_count,
@@ -431,6 +490,12 @@ class DashboardView(TenantWebMixin, TemplateView):
             'analytics_source_rows': analytics_source_rows,
             'analytics_closed_count': closed_count,
             'analytics_win_rate': win_rate,
+            'lead_trend_days': lead_trend_days,
+            'lead_trend_points': lead_trend_points,
+            'lead_trend_area_points': lead_trend_area_points,
+            'lead_trend_grid_lines': lead_trend_grid_lines,
+            'lead_trend_total': lead_trend_total,
+            'lead_trend_peak': lead_trend_peak,
             'team_attention': team_attention,
             'team_attention_overflow': team_attention_overflow,
         })
