@@ -129,13 +129,20 @@
             </form>
           </div>
         </details>
+        {% if messages %}
+          <div class="flash-stack" aria-live="polite">
+            {% for message in messages %}
+              <div class="flash-message {{ message.tags }}" data-flash-message role="status">
+                <span class="flash-message-copy">{{ message }}</span>
+                <button class="flash-dismiss" type="button" data-flash-dismiss aria-label="Dismiss notification">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"></path></svg>
+                </button>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
       </header>
       {% endblock %}
-      {% if messages %}
-        <div class="flash-stack" aria-live="polite">
-          {% for message in messages %}<div class="flash-message {{ message.tags }}">{{ message }}</div>{% endfor %}
-        </div>
-      {% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>

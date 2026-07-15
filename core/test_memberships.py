@@ -97,6 +97,17 @@ class WebWorkspaceSwitchingTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.client.session[ACTIVE_BUSINESS_SESSION_KEY], str(self.solar.id))
 
+    def test_workspace_switch_confirmation_is_a_dismissible_topbar_toast(self):
+        response = self.client.post(
+            reverse('web:workspace-switch'),
+            {'business_id': str(self.cctv.id)},
+            follow=True,
+        )
+
+        self.assertContains(response, 'You are now working in Bright CCTV.')
+        self.assertContains(response, 'class="flash-stack"')
+        self.assertContains(response, 'data-flash-dismiss')
+
 
 class OwnerBusinessCreationTests(TestCase):
     def setUp(self):
