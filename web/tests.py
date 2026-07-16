@@ -166,6 +166,42 @@ class ProfileAndAvatarTests(TestCase):
         self.assertContains(team_response, 'status-toggle')
         self.assertContains(service_response, 'status-toggle')
 
+    def test_signed_in_user_can_change_password_from_profile_and_keep_their_session(self):
+        profile_response = self.client.get(reverse('web:profile'))
+
+        self.assertContains(profile_response, 'Change password')
+        self.assertContains(profile_response, 'Forgot your current password?')
+        self.assertContains(profile_response, reverse('web:profile-password-change'))
+
+        response = self.client.post(
+            reverse('web:profile-password-change'),
+            {
+                'current_password': 'test-password',
+                'new_password': 'Profile-new-passphrase-5172!',
+                'new_password_confirmation': 'Profile-new-passphrase-5172!',
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertRedirects(response, reverse('web:profile'))
+        self.assertTrue(self.owner.check_password('Profile-new-passphrase-5172!'))
+        self.assertEqual(self.client.get(reverse('web:profile')).status_code, 200)
+
+    def test_profile_password_change_rejects_an_incorrect_current_password(self):
+        response = self.client.post(
+            reverse('web:profile-password-change'),
+            {
+                'current_password': 'incorrect-password',
+                'new_password': 'Profile-new-passphrase-5172!',
+                'new_password_confirmation': 'Profile-new-passphrase-5172!',
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Your current password is incorrect.')
+        self.assertTrue(self.owner.check_password('test-password'))
+
 
 class DashboardAnalyticsTests(TestCase):
     def setUp(self):
@@ -444,6 +480,36 @@ class PasswordResetWebTests(TestCase):
         self.assertRedirects(response, reverse('web:login'))
         self.assertTrue(self.user.check_password('Unique-reset-passphrase-5172!'))
         self.assertFalse(PasswordResetRequest.objects.filter(user=self.user).exists())
+
+    def test_signed_in_user_can_recover_with_a_code_and_stay_signed_in(self):
+        self.client.force_login(self.user)
+        request_page = self.client.get(reverse('web:password-reset-request'))
+
+        self.assertContains(request_page, f'value="{self.user.email}"')
+
+        PasswordResetRequest.objects.create(
+            user=self.user,
+            code_hash=make_password('123456'),
+            sent_at=timezone.now(),
+        )
+        session = self.client.session
+        session['password_reset_email'] = self.user.email
+        session.save()
+
+        response = self.client.post(
+            reverse('web:password-reset-confirm'),
+            {
+                'email': self.user.email,
+                'code': '123456',
+                'new_password': 'Recovered-while-signed-in-5172!',
+                'new_password_confirmation': 'Recovered-while-signed-in-5172!',
+            },
+        )
+
+        self.user.refresh_from_db()
+        self.assertRedirects(response, reverse('web:profile'))
+        self.assertTrue(self.user.check_password('Recovered-while-signed-in-5172!'))
+        self.assertEqual(self.client.get(reverse('web:profile')).status_code, 200)
 
 
 class LeadBoardPaginationTests(TestCase):

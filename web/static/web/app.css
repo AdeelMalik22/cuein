@@ -5787,6 +5787,28 @@ body.task-queue-page .task-page-summary i {
     font-size: 1.7rem;
 }
 
+.profile-security-section {
+    border-top: 1px solid var(--line);
+    margin-top: 2rem;
+    padding-top: 1.7rem;
+}
+
+.profile-password-form {
+    margin-top: 1.2rem;
+    max-width: 480px;
+}
+
+.profile-password-recovery {
+    color: var(--muted);
+    font-size: .82rem;
+    margin: -.3rem 0 .2rem;
+}
+
+.profile-password-recovery a {
+    color: var(--ink);
+    font-weight: 700;
+}
+
 .profile-summary-email {
     color: var(--muted);
     font-size: .8rem;

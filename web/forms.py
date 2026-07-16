@@ -209,6 +209,53 @@ class PasswordResetConfirmForm(EmailVerificationCodeForm):
         return cleaned_data
 
 
+class CurrentPasswordChangeForm(forms.Form):
+    """Let an authenticated person change their password without email recovery."""
+
+    current_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={
+            'autocomplete': 'current-password',
+            'placeholder': 'Enter your current password',
+        }),
+    )
+    new_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={
+            'autocomplete': 'new-password',
+            'placeholder': 'Choose a new password',
+        }),
+    )
+    new_password_confirmation = forms.CharField(
+        label='Confirm new password',
+        widget=forms.PasswordInput(attrs={
+            'autocomplete': 'new-password',
+            'placeholder': 'Enter it again',
+        }),
+    )
+
+    def __init__(self, *args, user, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.user = user
+
+    def clean_current_password(self):
+        password = self.cleaned_data['current_password']
+        if not self.user.check_password(password):
+            raise ValidationError('Your current password is incorrect.')
+        return password
+
+    def clean_new_password(self):
+        password = self.cleaned_data['new_password']
+        validate_password(password, self.user)
+        return password
+
+    def clean(self):
+        cleaned_data = super().clean()
+        password = cleaned_data.get('new_password')
+        confirmation = cleaned_data.get('new_password_confirmation')
+        if password and confirmation and password != confirmation:
+            self.add_error('new_password_confirmation', 'The two password fields did not match.')
+        return cleaned_data
+
+
 class TeamUserForm(forms.ModelForm):
     password = forms.CharField(required=False, widget=forms.PasswordInput)
     role = forms.ChoiceField(choices=User.Role.choices)
