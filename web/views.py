@@ -227,7 +227,7 @@ class PasswordResetConfirmView(FormView):
         if signed_in_user_id == user.pk:
             update_session_auth_hash(self.request, user)
             messages.success(self.request, 'Your password has been reset. You are still signed in.')
-            return redirect('web:profile')
+            return redirect('web:security-settings')
         messages.success(self.request, 'Your password has been reset. You can now sign in.')
         return redirect('web:login')
 
@@ -1215,11 +1215,22 @@ class ProfileView(TenantWebMixin, UpdateView):
     def form_valid(self, form):
         form.save()
         messages.success(self.request, 'Your profile was updated.')
-        return redirect('web:profile')
+        return redirect('web:account-settings-profile')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['password_form'] = kwargs.get('password_form') or CurrentPasswordChangeForm(user=self.request.user)
+        context.update(self.common_context())
+        return context
+
+
+class SecuritySettingsView(TenantWebMixin, TemplateView):
+    """Account security settings that are available today."""
+
+    template_name = 'web/security_settings.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['password_form'] = CurrentPasswordChangeForm(user=self.request.user)
         context.update(self.common_context())
         return context
 
@@ -1230,18 +1241,15 @@ class ProfilePasswordChangeView(TenantWebMixin, View):
     def post(self, request):
         password_form = CurrentPasswordChangeForm(request.POST, user=request.user)
         if not password_form.is_valid():
-            context = {
-                'form': ProfileForm(instance=request.user),
-                'password_form': password_form,
-            }
+            context = {'password_form': password_form}
             context.update(self.common_context())
-            return render(request, 'web/profile.html', context)
+            return render(request, 'web/security_settings.html', context)
 
         request.user.set_password(password_form.cleaned_data['new_password'])
         request.user.save(update_fields=('password',))
         update_session_auth_hash(request, request.user)
         messages.success(request, 'Your password was updated. You are still signed in.')
-        return redirect('web:profile')
+        return redirect('web:security-settings')
 
 
 class BusinessSettingsView(OwnerRequiredMixin, FormView):

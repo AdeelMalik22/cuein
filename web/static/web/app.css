@@ -5760,6 +5760,53 @@ body.task-queue-page .task-page-summary i {
     color: var(--accent-dark);
 }
 
+.settings-layout {
+    align-items: start;
+    display: grid;
+    gap: .9rem;
+    grid-template-columns: minmax(220px, .42fr) minmax(0, 1fr);
+    max-width: 900px;
+    padding-bottom: 2rem;
+}
+
+.settings-nav-panel {
+    padding: 1rem;
+}
+
+.settings-nav {
+    display: grid;
+    gap: .35rem;
+    margin-top: .7rem;
+}
+
+.settings-nav-link {
+    border-radius: .55rem;
+    color: var(--muted);
+    display: block;
+    padding: .7rem .75rem;
+}
+
+.settings-nav-link:hover,
+.settings-nav-link.is-active {
+    background: var(--surface-muted);
+    color: var(--ink);
+}
+
+.settings-nav-link strong,
+.settings-nav-link small {
+    display: block;
+}
+
+.settings-nav-link strong {
+    font-size: .82rem;
+}
+
+.settings-nav-link small {
+    font-size: .7rem;
+    line-height: 1.35;
+    margin-top: .12rem;
+}
+
 .profile-layout {
     align-items: start;
     display: grid;
@@ -6162,7 +6209,8 @@ body.task-queue-page .task-page-summary i {
         min-width: min(248px, calc(100vw - 2rem));
     }
 
-    .profile-layout {
+    .profile-layout,
+    .settings-layout {
         grid-template-columns: 1fr;
     }
 }

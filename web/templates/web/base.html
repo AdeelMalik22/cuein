@@ -89,9 +89,9 @@
             <a href="{% url 'web:product-list' %}" class="nav-item {% if request.resolver_match.url_name == 'product-list' or request.resolver_match.url_name == 'product-edit' %}active{% endif %}">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m20 7-8 4-8-4 8-4 8 4Zm-16 4 8 4 8-4M4 15l8 4 8-4"></path></svg><span>Services</span>
             </a>
-            <a href="{% url 'web:business-settings' %}" class="nav-item {% if request.resolver_match.url_name == 'business-settings' %}active{% endif %}">
+            {% comment %}<a href="{% url 'web:business-settings' %}" class="nav-item {% if request.resolver_match.url_name == 'business-settings' %}active{% endif %}">
               <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.63 2.63-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56v.1h-3.72v-.1a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06-2.63-2.63.06-.06A1.7 1.7 0 0 0 5.3 15a1.7 1.7 0 0 0-1.56-1.04h-.1v-3.72h.1A1.7 1.7 0 0 0 5.3 9.2a1.7 1.7 0 0 0-.34-1.87L4.9 7.27l2.63-2.63.06.06a1.7 1.7 0 0 0 1.87.34 1.7 1.7 0 0 0 1.04-1.56v-.1h3.72v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.63 2.63-.06.06a1.7 1.7 0 0 0-.34 1.87 1.7 1.7 0 0 0 1.56 1.04h.1v3.72h-.1A1.7 1.7 0 0 0 19.4 15Z"></path></svg><span>Settings</span>
-            </a>
+            </a>{% endcomment %}
           {% endif %}
         {% endif %}
       </nav>
@@ -116,10 +116,16 @@
             <svg class="topbar-user-chevron" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></svg>
           </summary>
           <div class="account-menu-panel">
-            <a class="account-menu-action" href="{% url 'web:profile' %}">
+            <a class="account-menu-action" href="{% url 'web:account-settings-profile' %}">
               <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.25"></circle><path d="M5.5 20a6.5 6.5 0 0 1 13 0"></path></svg>
-              <span><strong>Profile</strong><small>View and edit your account</small></span>
+              <span><strong>Settings</strong><small>Profile and security</small></span>
             </a>
+            {% if is_owner %}
+              <a class="account-menu-action" href="{% url 'web:business-settings' %}">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.63 2.63-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56v.1h-3.72v-.1a1.7 1.7 0 0 0-1.04-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06-2.63-2.63.06-.06A1.7 1.7 0 0 0 5.3 15a1.7 1.7 0 0 0-.34-1.87L4.9 7.27l2.63-2.63.06.06a1.7 1.7 0 0 0 1.87.34 1.7 1.7 0 0 0 1.04-1.56v-.1h3.72v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.63 2.63-.06.06a1.7 1.7 0 0 0-.34 1.87 1.7 1.7 0 0 0 1.56 1.04h.1v3.72h-.1A1.7 1.7 0 0 0 19.4 15Z"></path></svg>
+                <span><strong>Workspace settings</strong><small>Manage {{ business.name }}</small></span>
+              </a>
+            {% endif %}
             <form method="post" action="{% url 'web:logout' %}">
               {% csrf_token %}
               <button class="account-menu-action account-menu-logout" type="submit">
