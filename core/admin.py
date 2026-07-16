@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Business, Membership, PendingRegistration, User
+from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
 
 
 @admin.register(Business)
@@ -35,3 +35,11 @@ class PendingRegistrationAdmin(admin.ModelAdmin):
     list_display = ('business_name', 'email', 'username', 'created_at', 'verification_sent_at')
     search_fields = ('business_name', 'email', 'username')
     readonly_fields = ('password', 'created_at', 'verification_sent_at')
+
+
+@admin.register(PasswordResetRequest)
+class PasswordResetRequestAdmin(admin.ModelAdmin):
+    list_display = ('user', 'sent_at', 'attempts', 'created_at')
+    search_fields = ('user__username', 'user__email')
+    readonly_fields = ('code_hash', 'created_at', 'sent_at', 'attempts')
+    autocomplete_fields = ('user',)

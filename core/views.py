@@ -13,11 +13,19 @@ from .email_verification import (
     EmailVerificationError,
     send_email_verification,
 )
+from .password_reset import (
+    PasswordResetDeliveryError,
+    PasswordResetError,
+    reset_password,
+    send_password_reset_code,
+)
 from .models import Membership, PendingRegistration, User
 from .permissions import IsBusinessOwner
 from .serializers import (
     BusinessSerializer,
     CurrentUserSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     ResendVerificationCodeSerializer,
     SignupSerializer,
     TeamUserSerializer,
@@ -115,6 +123,50 @@ class ResendVerificationCodeView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         return Response({'detail': 'If a pending registration uses that email, a code is on its way.'})
+
+
+class PasswordResetRequestView(APIView):
+    """Email a reset code without revealing whether the account exists."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = User.objects.filter(
+            email__iexact=serializer.validated_data['email'],
+            is_active=True,
+        ).first()
+        if user:
+            try:
+                send_password_reset_code(user)
+            except (PasswordResetDeliveryError, PasswordResetError):
+                # The public response must remain the same, otherwise this
+                # endpoint would disclose which email addresses have accounts.
+                pass
+        return Response({'detail': 'If an active account uses that email, a six-digit reset code is on its way.'})
+
+
+class PasswordResetConfirmView(APIView):
+    """Set a new password after a valid emailed reset code is supplied."""
+
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            reset_password(
+                serializer.validated_data['email'],
+                serializer.validated_data['code'],
+                serializer.validated_data['new_password'],
+            )
+        except PasswordResetError:
+            return Response(
+                {'detail': 'That email address or reset code is not valid, has expired, or has already been used.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'detail': 'Your password has been reset. You can now sign in.'})
 
 
 class CurrentBusinessView(APIView):
