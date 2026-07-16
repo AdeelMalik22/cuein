@@ -1,5 +1,6 @@
 from django.core.management import call_command
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -169,8 +170,18 @@ class OwnerBusinessCreationTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'workspace-token-api-tests',
+        },
+    },
+)
 class ApiWorkspaceTokenTests(APITestCase):
     def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.solar = Business.objects.create(name='North Star Solar')
         self.cctv = Business.objects.create(name='Bright CCTV')
         self.unavailable = Business.objects.create(name='Private HVAC')

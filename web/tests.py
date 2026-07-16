@@ -2,14 +2,17 @@ import base64
 import shutil
 import tempfile
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth.hashers import make_password
+from django.core.cache import cache
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.models import Business, PasswordResetRequest, PendingRegistration, User
 from followups.models import FollowUpTask
@@ -43,7 +46,15 @@ class LoginPageTests(SimpleTestCase):
         self.assertContains(response, 'web/app.js')
         self.assertContains(response, reverse('web:password-reset-request'))
 
-    @override_settings(AUTHENTICATION_BACKENDS=('web.tests.RejectingAuthenticationBackend',))
+    @override_settings(
+        AUTHENTICATION_BACKENDS=('web.tests.RejectingAuthenticationBackend',),
+        CACHES={
+            'default': {
+                'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+                'LOCATION': 'login-page-tests',
+            },
+        },
+    )
     def test_invalid_credentials_error_is_below_the_password_field(self):
         response = self.client.post(reverse('web:login'), {'username': 'wrong', 'password': 'wrong'})
         content = response.content.decode()
@@ -53,6 +64,73 @@ class LoginPageTests(SimpleTestCase):
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'aria-describedby="login-credentials-error"', count=2)
         self.assertLess(content.index('id="login-password"'), content.index('id="login-credentials-error"'))
+
+
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'browser-auth-security-tests',
+        },
+    },
+    BROWSER_AUTH_THROTTLE_RATES={
+        'web_signup': '2/minute',
+        'web_login': '10/minute',
+    },
+)
+class BrowserAuthSecurityTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        self.business = Business.objects.create(name='North Star Solar')
+        self.user = User.objects.create_user(
+            username='owner',
+            password='Original-password-5172!',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+
+    def test_signup_form_is_throttled_before_a_third_post(self):
+        self.client.post(reverse('web:signup'), {})
+        self.client.post(reverse('web:signup'), {})
+        throttled_response = self.client.post(reverse('web:signup'), {})
+
+        self.assertRedirects(
+            throttled_response,
+            reverse('web:signup'),
+            fetch_redirect_response=False,
+        )
+
+    @override_settings(
+        LOGIN_BACKOFF_FAILURE_THRESHOLD=1,
+        LOGIN_BACKOFF_BASE_SECONDS=0,
+        LOGIN_CAPTCHA_FAILURE_THRESHOLD=1,
+        TURNSTILE_SITE_KEY='test-site-key',
+        TURNSTILE_SECRET_KEY='test-secret-key',
+    )
+    @patch('web.forms.verify_turnstile', side_effect=lambda token, _ip: token == 'valid-captcha')
+    def test_login_shows_captcha_only_after_a_failed_attempt(self, _verify_turnstile):
+        failed_response = self.client.post(
+            reverse('web:login'),
+            {'username': self.user.username, 'password': 'wrong-password'},
+        )
+        missing_captcha_response = self.client.post(
+            reverse('web:login'),
+            {'username': self.user.username, 'password': 'Original-password-5172!'},
+        )
+        verified_response = self.client.post(
+            reverse('web:login'),
+            {
+                'username': self.user.username,
+                'password': 'Original-password-5172!',
+                'captcha_token': 'valid-captcha',
+            },
+        )
+
+        self.assertEqual(failed_response.status_code, 200)
+        self.assertContains(failed_response, 'cf-turnstile')
+        self.assertContains(missing_captcha_response, 'Please complete the security check')
+        self.assertEqual(verified_response.status_code, 302)
 
 
 class ProfileAndAvatarTests(TestCase):
@@ -174,8 +252,17 @@ class ProfileAndAvatarTests(TestCase):
         self.assertContains(team_response, 'status-toggle')
         self.assertContains(service_response, 'status-toggle')
 
+    @override_settings(
+        CACHES={
+            'default': {
+                'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+                'LOCATION': 'profile-password-token-revocation-tests',
+            },
+        },
+    )
     def test_signed_in_user_can_change_password_from_security_settings_and_keep_their_session(self):
         security_response = self.client.get(reverse('web:security-settings'))
+        refresh = RefreshToken.for_user(self.owner)
 
         self.assertContains(security_response, 'Password')
         self.assertContains(security_response, 'Forgot your current password?')
@@ -194,6 +281,8 @@ class ProfileAndAvatarTests(TestCase):
         self.assertRedirects(response, reverse('web:security-settings'))
         self.assertTrue(self.owner.check_password('Profile-new-passphrase-5172!'))
         self.assertEqual(self.client.get(reverse('web:security-settings')).status_code, 200)
+        refresh_response = self.client.post(reverse('token_refresh'), {'refresh': str(refresh)})
+        self.assertEqual(refresh_response.status_code, 401)
 
     def test_security_password_change_rejects_an_incorrect_current_password(self):
         response = self.client.post(
@@ -400,8 +489,18 @@ class ReportsSalespersonPaginationTests(TestCase):
         self.assertContains(expanded_response, '?salespeople_limit=10#salesperson-conversion')
 
 
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'email-verification-web-tests',
+        },
+    },
+)
 class EmailVerificationTests(TestCase):
     def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.registration = PendingRegistration.objects.create(
             business_name='North Star Solar',
             industry=Business.Industry.SOLAR,
@@ -487,8 +586,18 @@ class EmailVerificationTests(TestCase):
         self.assertFalse(User.objects.filter(email='owner@northstar.example').exists())
 
 
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'password-reset-web-tests',
+        },
+    },
+)
 class PasswordResetWebTests(TestCase):
     def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.business = Business.objects.create(name='North Star Solar')
         self.user = User.objects.create_user(
             username='owner',

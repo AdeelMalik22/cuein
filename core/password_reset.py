@@ -1,6 +1,7 @@
 """Expiring six-digit email codes used to reset an existing account password."""
 
 import logging
+import math
 import secrets
 from datetime import timedelta
 
@@ -11,6 +12,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from .authentication import revoke_refresh_tokens_for_user
 from .models import PasswordResetRequest, User
 
 
@@ -27,6 +29,14 @@ class PasswordResetDeliveryError(RuntimeError):
     """The reset message could not be handed to the configured backend."""
 
 
+class PasswordResetCooldownError(PasswordResetError):
+    """A recent reset email remains valid, so another is not sent yet."""
+
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__('A password reset code was sent too recently.')
+
+
 def _new_reset_code() -> str:
     return f'{secrets.randbelow(10 ** PASSWORD_RESET_CODE_LENGTH):0{PASSWORD_RESET_CODE_LENGTH}d}'
 
@@ -38,15 +48,26 @@ def _reset_code_expired(reset_request: PasswordResetRequest) -> bool:
     return timezone.now() >= expires_at
 
 
+def _password_reset_retry_after(reset_request: PasswordResetRequest) -> int:
+    if not reset_request.sent_at:
+        return 0
+    available_at = reset_request.sent_at + timedelta(seconds=settings.PASSWORD_RESET_RESEND_COOLDOWN)
+    return max(0, math.ceil((available_at - timezone.now()).total_seconds()))
+
+
 def send_password_reset_code(user: User) -> None:
     """Issue a new code for an account, replacing any earlier code."""
-    code = _new_reset_code()
     try:
         with transaction.atomic():
             # Lock the user too, so concurrent requests cannot create two
             # records for the OneToOne relation or race to issue a code.
             user = User.objects.select_for_update().get(pk=user.pk)
             reset_request, _ = PasswordResetRequest.objects.get_or_create(user=user)
+            retry_after = _password_reset_retry_after(reset_request)
+            if retry_after:
+                raise PasswordResetCooldownError(retry_after)
+
+            code = _new_reset_code()
             reset_request.code_hash = make_password(code)
             reset_request.attempts = 0
             reset_request.sent_at = timezone.now()
@@ -71,6 +92,8 @@ def send_password_reset_code(user: User) -> None:
             if sent_count != 1:
                 raise PasswordResetDeliveryError('Unable to send the password reset email.')
     except PasswordResetDeliveryError:
+        raise
+    except PasswordResetCooldownError:
         raise
     except (User.DoesNotExist, PasswordResetRequest.DoesNotExist) as error:
         raise PasswordResetError('This account is no longer available.') from error
@@ -108,6 +131,7 @@ def reset_password(email: str, code: str, new_password: str) -> User:
             user = reset_request.user
             user.set_password(new_password)
             user.save(update_fields=('password',))
+            revoke_refresh_tokens_for_user(user)
             reset_request.delete()
 
     if failure_message:

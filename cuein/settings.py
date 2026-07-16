@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -36,13 +38,54 @@ load_local_env(BASE_DIR / '.env')
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-(59r7w^v=bf5jwg36#dxi7iolsydln@8vwc-7!xb5aw9hr*@p7'
+ENVIRONMENT = os.environ.get('DJANGO_ENV', 'development').lower()
+IS_PRODUCTION = ENVIRONMENT == 'production'
+DEBUG = os.environ.get('DJANGO_DEBUG', 'false' if IS_PRODUCTION else 'true').lower() == 'true'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+if IS_PRODUCTION and DEBUG:
+    raise ImproperlyConfigured('DJANGO_DEBUG must be false in production.')
 
-ALLOWED_HOSTS = []
+# A predictable development key keeps local setup simple, but production must
+# supply its own secret through the environment.
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
+if not SECRET_KEY:
+    if IS_PRODUCTION:
+        raise ImproperlyConfigured('DJANGO_SECRET_KEY must be configured in production.')
+    SECRET_KEY = 'django-insecure-development-only-change-before-production'
+
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',')
+    if host.strip()
+]
+if IS_PRODUCTION and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS must be configured in production.')
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+
+SECURE_SSL_REDIRECT = IS_PRODUCTION
+SESSION_COOKIE_SECURE = IS_PRODUCTION
+CSRF_COOKIE_SECURE = IS_PRODUCTION
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+SECURE_HSTS_SECONDS = 31_536_000 if IS_PRODUCTION else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get(
+    'DJANGO_HSTS_INCLUDE_SUBDOMAINS',
+    'false',
+).lower() == 'true'
+SECURE_HSTS_PRELOAD = os.environ.get('DJANGO_HSTS_PRELOAD', 'false').lower() == 'true'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = 'same-origin'
+X_FRAME_OPTIONS = 'DENY'
+
+TRUST_X_FORWARDED_FOR = os.environ.get('DJANGO_BEHIND_PROXY', '').lower() == 'true'
+if TRUST_X_FORWARDED_FOR:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition
@@ -55,6 +98,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'rest_framework_simplejwt.token_blacklist',
     'core.apps.CoreConfig',
     'leads',
     'followups',
@@ -165,8 +209,34 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'true').lower() == 'true'
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'false').lower() == 'true'
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
 EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', str(24 * 60 * 60)))
+EMAIL_VERIFICATION_RESEND_COOLDOWN = int(os.environ.get('EMAIL_VERIFICATION_RESEND_COOLDOWN', '60'))
 # Password-reset codes are intentionally shorter-lived than signup codes.
 PASSWORD_RESET_TIMEOUT = int(os.environ.get('PASSWORD_RESET_TIMEOUT', str(15 * 60)))
+PASSWORD_RESET_RESEND_COOLDOWN = int(os.environ.get('PASSWORD_RESET_RESEND_COOLDOWN', '60'))
+
+# Browser posts do not pass through DRF, so they use the same shared cache
+# through core.security. Code records still have their own five-attempt cap.
+BROWSER_AUTH_THROTTLE_RATES = {
+    'web_signup': '5/hour',
+    'web_email_verify': '10/hour',
+    'web_email_resend': '3/hour',
+    'web_password_reset_request': '3/hour',
+    'web_password_reset_confirm': '10/hour',
+    'web_login': '10/minute',
+}
+
+LOGIN_FAILURE_WINDOW = int(os.environ.get('LOGIN_FAILURE_WINDOW', str(60 * 60)))
+LOGIN_BACKOFF_FAILURE_THRESHOLD = int(os.environ.get('LOGIN_BACKOFF_FAILURE_THRESHOLD', '3'))
+LOGIN_BACKOFF_BASE_SECONDS = int(os.environ.get('LOGIN_BACKOFF_BASE_SECONDS', '30'))
+LOGIN_BACKOFF_MAX_SECONDS = int(os.environ.get('LOGIN_BACKOFF_MAX_SECONDS', str(15 * 60)))
+LOGIN_CAPTCHA_FAILURE_THRESHOLD = int(os.environ.get('LOGIN_CAPTCHA_FAILURE_THRESHOLD', '3'))
+
+# Turnstile is intentionally opt-in: normal sign-ins never see it, and it is
+# required only after repeated failures once both deployment keys are set.
+TURNSTILE_SITE_KEY = os.environ.get('TURNSTILE_SITE_KEY', '')
+TURNSTILE_SECRET_KEY = os.environ.get('TURNSTILE_SECRET_KEY', '')
+TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
+TURNSTILE_TIMEOUT = int(os.environ.get('TURNSTILE_TIMEOUT', '5'))
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -184,8 +254,25 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    # Scoped throttles below apply only to public authentication routes. They
+    # use the shared Redis cache configured in CACHES, so limits hold across
+    # application workers.
+    'DEFAULT_THROTTLE_RATES': {
+        'auth_signup': '5/hour',
+        'auth_email_verify': '5/hour',
+        'auth_email_resend': '3/hour',
+        'auth_password_reset_request': '3/hour',
+        'auth_password_reset_confirm': '10/hour',
+        'auth_token': '10/minute',
+        'auth_token_refresh': '30/minute',
+    },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+}
+
+SIMPLE_JWT = {
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/0')
