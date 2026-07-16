@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth.hashers import make_password
 from django.core import mail
 from django.test import override_settings
@@ -6,7 +8,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Business, PendingRegistration, User
+from .models import Business, PasswordResetRequest, PendingRegistration, User
 
 
 class CurrentUserApiTests(APITestCase):
@@ -139,3 +141,128 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         new_user = User.objects.get(username='salesperson')
         self.assertEqual(new_user.business, self.business)
+
+
+class PasswordResetApiTests(APITestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.user = User.objects.create_user(
+            username='owner',
+            password='Original-password-5172!',
+            email='owner@northstar.example',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+
+    @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+    def test_request_sends_a_code_for_an_active_account_without_revealing_unknown_addresses(self):
+        known_response = self.client.post(
+            reverse('password_reset_request'),
+            {'email': self.user.email},
+            format='json',
+        )
+
+        self.assertEqual(known_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('six-digit code', mail.outbox[0].body)
+        reset_request = PasswordResetRequest.objects.get(user=self.user)
+        self.assertTrue(reset_request.code_hash)
+        self.assertEqual(reset_request.attempts, 0)
+        self.assertIsNotNone(reset_request.sent_at)
+
+        unknown_response = self.client.post(
+            reverse('password_reset_request'),
+            {'email': 'missing@example.com'},
+            format='json',
+        )
+
+        self.assertEqual(unknown_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(unknown_response.data, known_response.data)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_confirm_changes_the_password_and_makes_the_code_single_use(self):
+        PasswordResetRequest.objects.create(
+            user=self.user,
+            code_hash=make_password('123456'),
+            sent_at=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse('password_reset_confirm'),
+            {
+                'email': self.user.email,
+                'code': '123456',
+                'new_password': 'Unique-reset-passphrase-5172!',
+            },
+            format='json',
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(self.user.check_password('Unique-reset-passphrase-5172!'))
+        self.assertFalse(PasswordResetRequest.objects.filter(user=self.user).exists())
+
+        reused_response = self.client.post(
+            reverse('password_reset_confirm'),
+            {
+                'email': self.user.email,
+                'code': '123456',
+                'new_password': 'Another-unique-passphrase-5172!',
+            },
+            format='json',
+        )
+
+        self.assertEqual(reused_response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(PASSWORD_RESET_TIMEOUT=60)
+    def test_expired_code_cannot_change_the_password(self):
+        PasswordResetRequest.objects.create(
+            user=self.user,
+            code_hash=make_password('123456'),
+            sent_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        response = self.client.post(
+            reverse('password_reset_confirm'),
+            {
+                'email': self.user.email,
+                'code': '123456',
+                'new_password': 'Unique-reset-passphrase-5172!',
+            },
+            format='json',
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(self.user.check_password('Original-password-5172!'))
+
+    def test_five_incorrect_codes_lock_the_reset_until_a_fresh_code_is_sent(self):
+        reset_request = PasswordResetRequest.objects.create(
+            user=self.user,
+            code_hash=make_password('123456'),
+            sent_at=timezone.now(),
+        )
+        wrong_payload = {
+            'email': self.user.email,
+            'code': '000000',
+            'new_password': 'Unique-reset-passphrase-5172!',
+        }
+        for _ in range(5):
+            response = self.client.post(
+                reverse('password_reset_confirm'),
+                wrong_payload,
+                format='json',
+            )
+            self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        locked_response = self.client.post(
+            reverse('password_reset_confirm'),
+            {**wrong_payload, 'code': '123456'},
+            format='json',
+        )
+
+        reset_request.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(reset_request.attempts, 5)
+        self.assertEqual(locked_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(self.user.check_password('Original-password-5172!'))

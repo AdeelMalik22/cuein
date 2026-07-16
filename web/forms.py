@@ -176,6 +176,39 @@ class EmailVerificationCodeForm(forms.Form):
         return code
 
 
+class PasswordResetRequestForm(EmailVerificationResendForm):
+    """Collect the email address to which a reset code should be sent."""
+
+
+class PasswordResetConfirmForm(EmailVerificationCodeForm):
+    new_password = forms.CharField(
+        widget=forms.PasswordInput(attrs={
+            'autocomplete': 'new-password',
+            'placeholder': 'Choose a new password',
+        }),
+    )
+    new_password_confirmation = forms.CharField(
+        label='Confirm new password',
+        widget=forms.PasswordInput(attrs={
+            'autocomplete': 'new-password',
+            'placeholder': 'Enter it again',
+        }),
+    )
+
+    def clean_new_password(self):
+        password = self.cleaned_data['new_password']
+        validate_password(password)
+        return password
+
+    def clean(self):
+        cleaned_data = super().clean()
+        password = cleaned_data.get('new_password')
+        confirmation = cleaned_data.get('new_password_confirmation')
+        if password and confirmation and password != confirmation:
+            self.add_error('new_password_confirmation', 'The two password fields did not match.')
+        return cleaned_data
+
+
 class TeamUserForm(forms.ModelForm):
     password = forms.CharField(required=False, widget=forms.PasswordInput)
     role = forms.ChoiceField(choices=User.Role.choices)

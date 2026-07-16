@@ -169,3 +169,21 @@ class PendingRegistration(models.Model):
 
     def __str__(self):
         return f'{self.business_name} ({self.email})'
+
+
+class PasswordResetRequest(models.Model):
+    """A single active, expiring password-reset code for one account."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='password_reset_request')
+    code_hash = models.CharField(max_length=128, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'password reset request'
+        verbose_name_plural = 'password reset requests'
+
+    def __str__(self):
+        return f'Password reset for {self.user.email or self.user.username}'

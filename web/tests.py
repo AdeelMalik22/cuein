@@ -11,7 +11,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Business, PendingRegistration, User
+from core.models import Business, PasswordResetRequest, PendingRegistration, User
 from followups.models import FollowUpTask
 from leads.models import Lead, Product
 from web.views import DashboardView
@@ -41,6 +41,7 @@ class LoginPageTests(SimpleTestCase):
         self.assertContains(response, 'aria-controls="login-password"')
         self.assertContains(response, 'aria-label="Show password"')
         self.assertContains(response, 'web/app.js')
+        self.assertContains(response, reverse('web:password-reset-request'))
 
     @override_settings(AUTHENTICATION_BACKENDS=('web.tests.RejectingAuthenticationBackend',))
     def test_invalid_credentials_error_is_below_the_password_field(self):
@@ -384,6 +385,65 @@ class EmailVerificationTests(TestCase):
         self.assertEqual(self.registration.verification_attempts, 5)
         self.assertRedirects(correct_code_response, reverse('web:email-verification-sent'))
         self.assertFalse(User.objects.filter(email='owner@northstar.example').exists())
+
+
+class PasswordResetWebTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.user = User.objects.create_user(
+            username='owner',
+            password='Original-password-5172!',
+            email='owner@northstar.example',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+
+    @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+    def test_requesting_a_reset_sends_a_code_and_opens_the_confirmation_form(self):
+        request_page = self.client.get(reverse('web:password-reset-request'))
+
+        self.assertEqual(request_page.status_code, 200)
+        self.assertContains(request_page, 'Send reset code')
+
+        response = self.client.post(
+            reverse('web:password-reset-request'),
+            {'email': self.user.email},
+        )
+
+        self.assertRedirects(response, reverse('web:password-reset-confirm'))
+        self.assertEqual(self.client.session['password_reset_email'], self.user.email)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('six-digit code', mail.outbox[0].body)
+        self.assertTrue(PasswordResetRequest.objects.filter(user=self.user).exists())
+
+        confirmation_page = self.client.get(reverse('web:password-reset-confirm'))
+        self.assertContains(confirmation_page, self.user.email)
+        self.assertContains(confirmation_page, 'Reset password')
+
+    def test_valid_code_sets_a_new_password_and_returns_to_sign_in(self):
+        PasswordResetRequest.objects.create(
+            user=self.user,
+            code_hash=make_password('123456'),
+            sent_at=timezone.now(),
+        )
+        session = self.client.session
+        session['password_reset_email'] = self.user.email
+        session.save()
+
+        response = self.client.post(
+            reverse('web:password-reset-confirm'),
+            {
+                'email': self.user.email,
+                'code': '123456',
+                'new_password': 'Unique-reset-passphrase-5172!',
+                'new_password_confirmation': 'Unique-reset-passphrase-5172!',
+            },
+        )
+
+        self.user.refresh_from_db()
+        self.assertRedirects(response, reverse('web:login'))
+        self.assertTrue(self.user.check_password('Unique-reset-passphrase-5172!'))
+        self.assertFalse(PasswordResetRequest.objects.filter(user=self.user).exists())
 
 
 class LeadBoardPaginationTests(TestCase):

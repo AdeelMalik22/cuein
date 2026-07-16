@@ -22,6 +22,12 @@ from core.email_verification import (
     EmailVerificationError,
     send_email_verification,
 )
+from core.password_reset import (
+    PasswordResetDeliveryError,
+    PasswordResetError,
+    reset_password,
+    send_password_reset_code,
+)
 from core.models import Membership, PendingRegistration, User
 from core.tenancy import (
     ACTIVE_BUSINESS_SESSION_KEY,
@@ -49,11 +55,16 @@ from .forms import (
     LeadStageForm,
     ProfileForm,
     ProductForm,
+    PasswordResetConfirmForm,
+    PasswordResetRequestForm,
     SignupForm,
     TaskCompletionForm,
     TaskRescheduleForm,
     TeamUserForm,
 )
+
+
+PASSWORD_RESET_EMAIL_SESSION_KEY = 'password_reset_email'
 
 
 def safe_post_redirect(request, fallback):
@@ -148,6 +159,62 @@ class EmailVerificationView(View):
         login(request, user)
         messages.success(request, 'Email verified. Your workspace is ready.')
         return redirect('web:onboarding')
+
+
+class PasswordResetRequestView(FormView):
+    """Start a password reset without revealing whether an account exists."""
+
+    template_name = 'web/password_reset_request.html'
+    form_class = PasswordResetRequestForm
+
+    def form_valid(self, form):
+        email = form.cleaned_data['email']
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+        if user:
+            try:
+                send_password_reset_code(user)
+            except (PasswordResetDeliveryError, PasswordResetError):
+                # Keep the browser response the same for known and unknown
+                # addresses so this form cannot be used to enumerate users.
+                pass
+        self.request.session[PASSWORD_RESET_EMAIL_SESSION_KEY] = email
+        messages.success(self.request, 'If an active account uses that email, a six-digit reset code is on its way.')
+        return redirect('web:password-reset-confirm')
+
+
+class PasswordResetConfirmView(FormView):
+    """Accept a reset code and a new password, then invalidate that code."""
+
+    template_name = 'web/password_reset_confirm.html'
+    form_class = PasswordResetConfirmForm
+
+    def get_initial(self):
+        initial = super().get_initial()
+        pending_email = self.request.session.get(PASSWORD_RESET_EMAIL_SESSION_KEY)
+        if pending_email:
+            initial['email'] = pending_email
+        return initial
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['pending_email'] = self.request.session.get(PASSWORD_RESET_EMAIL_SESSION_KEY, '')
+        context['password_reset_timeout_minutes'] = max(1, settings.PASSWORD_RESET_TIMEOUT // 60)
+        return context
+
+    def form_valid(self, form):
+        try:
+            reset_password(
+                form.cleaned_data['email'],
+                form.cleaned_data['code'],
+                form.cleaned_data['new_password'],
+            )
+        except PasswordResetError:
+            form.add_error(None, 'That email address or reset code is not valid, has expired, or has already been used.')
+            return self.form_invalid(form)
+
+        self.request.session.pop(PASSWORD_RESET_EMAIL_SESSION_KEY, None)
+        messages.success(self.request, 'Your password has been reset. You can now sign in.')
+        return redirect('web:login')
 
 
 class TenantWebMixin(LoginRequiredMixin):
