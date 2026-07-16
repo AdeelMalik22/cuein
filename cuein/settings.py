@@ -189,7 +189,7 @@ REST_FRAMEWORK = {
     # application workers.
     'DEFAULT_THROTTLE_RATES': {
         'auth_signup': '5/hour',
-        'auth_email_verify': '10/hour',
+        'auth_email_verify': '5/hour',
         'auth_email_resend': '3/hour',
         'auth_password_reset_request': '3/hour',
         'auth_password_reset_confirm': '10/hour',
