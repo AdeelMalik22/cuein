@@ -3000,6 +3000,172 @@ input::placeholder, textarea::placeholder {
     margin-top: 1.5rem;
 }
 
+.workspaces-section {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    border-top: 1px solid var(--line);
+    display: grid;
+    gap: clamp(2.5rem, 9vw, 9rem);
+    grid-template-columns: minmax(0, .95fr) minmax(330px, .7fr);
+    margin: 0 auto;
+    max-width: 1120px;
+    padding: clamp(4rem, 9vw, 7rem) 1.5rem;
+}
+
+.workspaces-copy h2 {
+    font-size: clamp(2rem, 4vw, 3.5rem);
+}
+
+.workspaces-copy > p:last-of-type {
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-top: 1rem;
+    max-width: 550px;
+}
+
+.workspace-benefits {
+    display: grid;
+    gap: .55rem;
+    list-style: none;
+    margin: 1.5rem 0 0;
+    padding: 0;
+}
+
+.workspace-benefits li {
+    align-items: center;
+    display: flex;
+    font-size: .8rem;
+    font-weight: 600;
+    gap: .65rem;
+}
+
+.workspace-benefits li::before {
+    align-items: center;
+    background: var(--accent);
+    border-radius: 50%;
+    color: var(--paper);
+    content: "✓";
+    display: flex;
+    font-size: .58rem;
+    height: 16px;
+    justify-content: center;
+    width: 16px;
+}
+
+.workspaces-preview {
+    background: var(--ink);
+    box-shadow: 12px 12px 0 var(--accent);
+    color: var(--paper);
+    padding: clamp(1rem, 2.6vw, 1.45rem);
+}
+
+.workspaces-preview-heading {
+    align-items: center;
+    border-bottom: 1px solid #3d3d3a;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 0 1rem;
+}
+
+.workspaces-preview-heading span {
+    color: #aaa9a5;
+    display: block;
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+}
+
+.workspaces-preview-heading strong {
+    display: block;
+    font-family: var(--display);
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: .18rem;
+}
+
+.workspaces-preview-heading .workspaces-preview-chevron {
+    color: var(--paper);
+    font-size: 1.25rem;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.workspaces-preview-list {
+    display: grid;
+    gap: .45rem;
+    margin-top: .8rem;
+}
+
+.workspaces-preview-option {
+    align-items: center;
+    border: 1px solid transparent;
+    display: grid;
+    gap: .65rem;
+    grid-template-columns: 30px 1fr auto;
+    padding: .62rem;
+}
+
+.workspaces-preview-option.is-current {
+    background: #292927;
+    border-color: #4b4b47;
+}
+
+.workspaces-preview-mark {
+    align-items: center;
+    background: #42423f;
+    border-radius: 50%;
+    color: #e4e4df;
+    display: flex;
+    font-size: .56rem;
+    font-weight: 700;
+    height: 30px;
+    justify-content: center;
+    width: 30px;
+}
+
+.is-current .workspaces-preview-mark {
+    background: var(--accent);
+    color: var(--paper);
+}
+
+.workspaces-preview-option strong,
+.workspaces-preview-option small {
+    display: block;
+}
+
+.workspaces-preview-option strong {
+    font-size: .75rem;
+}
+
+.workspaces-preview-option small {
+    color: #aaa9a5;
+    font-size: .62rem;
+    margin-top: .14rem;
+}
+
+.workspaces-preview-check {
+    color: var(--accent);
+    font-size: .85rem;
+    font-weight: 700;
+}
+
+.workspaces-preview-add {
+    border-top: 1px solid #3d3d3a;
+    color: #d0d0cb;
+    font-size: .7rem;
+    font-weight: 700;
+    margin-top: .85rem;
+    padding-top: .9rem;
+}
+
+.workspaces-preview-add span {
+    color: var(--accent);
+    font-size: 1rem;
+    margin-right: .3rem;
+}
+
 .automation-section {
     align-items: center;
     display: grid;
@@ -3759,7 +3925,7 @@ input::placeholder, textarea::placeholder {
         grid-column: auto;
     }
 
-    .marketing-hero, .automation-section {
+    .marketing-hero, .workspaces-section, .automation-section {
         grid-template-columns: 1fr;
     }
 
@@ -4244,7 +4410,7 @@ input::placeholder, textarea::placeholder {
         grid-template-columns: repeat(7, 126px);
     }
 
-    .automation-section, .industries-section {
+    .workspaces-section, .automation-section, .industries-section {
         padding-left: 1rem;
         padding-right: 1rem;
     }

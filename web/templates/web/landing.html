@@ -16,6 +16,7 @@
     <a class="wordmark" href="{% url 'web:landing' %}"><span>c</span>uein</a>
     <nav aria-label="Marketing navigation">
       <a href="#workflow">How it works</a>
+      <a href="#workspaces">Multiple businesses</a>
       <a href="#built-for">Built for your work</a>
       <a href="{% url 'web:login' %}">Sign in</a>
       <a class="button button-dark" href="{% url 'web:signup' %}">Start free</a>
@@ -64,9 +65,9 @@
 
     <section id="workflow" class="pipeline-section">
       <div class="section-intro">
-        <p class="eyebrow">ONE SHARED PIPELINE</p>
+        <p class="eyebrow">A CLEAR PIPELINE FOR EVERY BUSINESS</p>
         <h2>From first message to a clear outcome.</h2>
-        <p>No custom maze of fields. Just the seven moments a service sale actually moves through.</p>
+        <p>Each business gets the same simple pipeline: the seven moments a service sale actually moves through.</p>
       </div>
       <ol class="marketing-pipeline">
         <li><span>01</span><strong>New inquiry</strong></li>
@@ -77,6 +78,42 @@
         <li><span>06</span><strong>Won</strong></li>
         <li><span>07</span><strong>Lost</strong></li>
       </ol>
+    </section>
+
+    <section id="workspaces" class="workspaces-section">
+      <div class="workspaces-copy">
+        <p class="eyebrow">MULTIPLE BUSINESSES, ONE SIGN-IN</p>
+        <h2>Manage every business without mixing up the work.</h2>
+        <p>Create a separate workspace for every business you own or manage. Switch between them easily while each business keeps its own leads, team, services, follow-ups, and reports.</p>
+        <ul class="workspace-benefits">
+          <li>One login for all your businesses</li>
+          <li>Separate workspace for each business</li>
+          <li>Switch workspaces whenever you need</li>
+        </ul>
+      </div>
+
+      <div class="workspaces-preview" aria-label="Example of switching between business workspaces">
+        <div class="workspaces-preview-heading">
+          <div><span>Workspace</span><strong>Northstar Solar</strong></div>
+          <span class="workspaces-preview-chevron" aria-hidden="true">⌄</span>
+        </div>
+        <div class="workspaces-preview-list">
+          <div class="workspaces-preview-option is-current">
+            <span class="workspaces-preview-mark">NS</span>
+            <span><strong>Northstar Solar</strong><small>Owner · Current workspace</small></span>
+            <span class="workspaces-preview-check" aria-label="Current workspace">✓</span>
+          </div>
+          <div class="workspaces-preview-option">
+            <span class="workspaces-preview-mark">CV</span>
+            <span><strong>City View Interiors</strong><small>Owner</small></span>
+          </div>
+          <div class="workspaces-preview-option">
+            <span class="workspaces-preview-mark">HP</span>
+            <span><strong>Horizon Projects</strong><small>Manager</small></span>
+          </div>
+        </div>
+        <div class="workspaces-preview-add"><span aria-hidden="true">+</span> Add a new business</div>
+      </div>
     </section>
 
     <section class="automation-section">
