@@ -67,6 +67,10 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
+ALLOWED_HOSTS = [
+    "18.212.153.6",
+    "ec2-18-212-153-6.compute-1.amazonaws.com",
+]
 SECURE_SSL_REDIRECT = IS_PRODUCTION
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
@@ -113,6 +117,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
 
 ROOT_URLCONF = 'cuein.urls'
