@@ -4,16 +4,19 @@ from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from .authentication import select_token_membership, token_pair_for_membership
 from .email_verification import (
     activate_pending_registration,
+    EmailVerificationCooldownError,
     EmailVerificationDeliveryError,
     EmailVerificationError,
     send_email_verification,
 )
 from .password_reset import (
+    PasswordResetCooldownError,
     PasswordResetDeliveryError,
     PasswordResetError,
     reset_password,
@@ -43,10 +46,17 @@ class CurrentUserView(APIView):
         return Response(CurrentUserSerializer(request.user, context={'request': request}).data)
 
 
-class SignupView(APIView):
-    """Send verification for a registration before creating its tenant or owner."""
+class PublicAuthAPIView(APIView):
+    """Public API endpoint with a configured, per-IP DRF rate limit."""
 
     permission_classes = (AllowAny,)
+    throttle_classes = (ScopedRateThrottle,)
+
+
+class SignupView(PublicAuthAPIView):
+    """Send verification for a registration before creating its tenant or owner."""
+
+    throttle_scope = 'auth_signup'
 
     def post(self, request):
         serializer = SignupSerializer(data=request.data)
@@ -70,10 +80,10 @@ class SignupView(APIView):
         )
 
 
-class VerifyEmailCodeView(APIView):
+class VerifyEmailCodeView(PublicAuthAPIView):
     """Complete a pending signup after the owner enters the emailed six-digit code."""
 
-    permission_classes = (AllowAny,)
+    throttle_scope = 'auth_email_verify'
 
     def post(self, request):
         serializer = VerifyEmailCodeSerializer(data=request.data)
@@ -103,10 +113,10 @@ class VerifyEmailCodeView(APIView):
         )
 
 
-class ResendVerificationCodeView(APIView):
+class ResendVerificationCodeView(PublicAuthAPIView):
     """Send a fresh code for a pending API or web registration."""
 
-    permission_classes = (AllowAny,)
+    throttle_scope = 'auth_email_resend'
 
     def post(self, request):
         serializer = ResendVerificationCodeSerializer(data=request.data)
@@ -117,6 +127,10 @@ class ResendVerificationCodeView(APIView):
 
         try:
             send_email_verification(registration)
+        except EmailVerificationCooldownError:
+            # Match the unknown-address response so resend requests cannot
+            # reveal whether an address has a pending registration.
+            pass
         except EmailVerificationDeliveryError:
             return Response(
                 {'detail': 'We could not send the verification code. Please try again in a moment.'},
@@ -125,10 +139,10 @@ class ResendVerificationCodeView(APIView):
         return Response({'detail': 'If a pending registration uses that email, a code is on its way.'})
 
 
-class PasswordResetRequestView(APIView):
+class PasswordResetRequestView(PublicAuthAPIView):
     """Email a reset code without revealing whether the account exists."""
 
-    permission_classes = (AllowAny,)
+    throttle_scope = 'auth_password_reset_request'
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -140,17 +154,17 @@ class PasswordResetRequestView(APIView):
         if user:
             try:
                 send_password_reset_code(user)
-            except (PasswordResetDeliveryError, PasswordResetError):
+            except (PasswordResetCooldownError, PasswordResetDeliveryError, PasswordResetError):
                 # The public response must remain the same, otherwise this
                 # endpoint would disclose which email addresses have accounts.
                 pass
         return Response({'detail': 'If an active account uses that email, a six-digit reset code is on its way.'})
 
 
-class PasswordResetConfirmView(APIView):
+class PasswordResetConfirmView(PublicAuthAPIView):
     """Set a new password after a valid emailed reset code is supplied."""
 
-    permission_classes = (AllowAny,)
+    throttle_scope = 'auth_password_reset_confirm'
 
     def post(self, request):
         serializer = PasswordResetConfirmSerializer(data=request.data)

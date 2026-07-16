@@ -19,6 +19,11 @@
     </section>
     <section class="auth-card signup-card">
       <div class="auth-card-heading"><p class="eyebrow">CREATE YOUR WORKSPACE</p><h2>Register your business</h2><p>It takes less than a minute. Your workspace is created only after you confirm the six-digit verification code.</p></div>
+      {% if messages %}
+        <div class="verification-messages" aria-live="polite">
+          {% for message in messages %}<p class="verification-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</p>{% endfor %}
+        </div>
+      {% endif %}
       <form method="post" class="auth-form">
         {% csrf_token %}
         {% for field in form %}

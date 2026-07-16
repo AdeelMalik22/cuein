@@ -111,10 +111,33 @@ For an account with more than one workspace, obtain a token for a specific busin
    EMAIL_USE_TLS=true
    EMAIL_USE_SSL=false
    EMAIL_VERIFICATION_TIMEOUT=86400
+   EMAIL_VERIFICATION_RESEND_COOLDOWN=60
    PASSWORD_RESET_TIMEOUT=900
+   PASSWORD_RESET_RESEND_COOLDOWN=60
    ```
 
-   Signup verification codes expire after 24 hours by default; password-reset codes expire after 15 minutes. Change either timeout in seconds if needed. In local development, email uses Django’s console backend by default, so the verification code is printed in the server terminal.
+   Signup verification codes expire after 24 hours by default; password-reset codes expire after 15 minutes. A recipient can receive a replacement code once per minute by default. Change the values in seconds if needed. In local development, email uses Django’s console backend by default, so the verification code is printed in the server terminal.
+
+   For production, configure the following as well. Setting `DJANGO_ENV=production` disables debug mode, requires a unique secret and allowed hosts, and enables HTTPS-only cookies, HTTPS redirect, HSTS, and secure response headers:
+
+   ```text
+   DJANGO_ENV=production
+   DJANGO_SECRET_KEY=generate-a-long-unique-secret
+   DJANGO_ALLOWED_HOSTS=app.yourdomain.com
+   DJANGO_CSRF_TRUSTED_ORIGINS=https://app.yourdomain.com
+   DJANGO_BEHIND_PROXY=true
+   ```
+
+   Set `DJANGO_BEHIND_PROXY=true` only when a trusted proxy terminates TLS and supplies `X-Forwarded-Proto` and `X-Forwarded-For`. To enable the conditional CAPTCHA after repeated failed logins, add Cloudflare Turnstile keys:
+
+   ```text
+   TURNSTILE_SITE_KEY=your-turnstile-site-key
+   TURNSTILE_SECRET_KEY=your-turnstile-secret-key
+   ```
+
+   HSTS is enabled for production by default. Set `DJANGO_HSTS_INCLUDE_SUBDOMAINS=true` and `DJANGO_HSTS_PRELOAD=true` only if every current and future subdomain is HTTPS-ready.
+
+   Refresh tokens are blacklisted after password changes. Schedule `python3.10 manage.py flushexpiredtokens` once per day in production to remove expired blacklist records.
 
 3. Install dependencies, migrate, and validate the project:
 

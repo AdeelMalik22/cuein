@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import login, update_session_auth_hash
+from django.contrib.auth import login, update_session_auth_hash, views as auth_views
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
@@ -18,17 +18,22 @@ from django.views.generic import FormView, ListView, TemplateView, UpdateView
 
 from core.email_verification import (
     activate_pending_registration,
+    EmailVerificationCooldownError,
     EmailVerificationDeliveryError,
     EmailVerificationError,
     send_email_verification,
 )
+from core.authentication import revoke_refresh_tokens_for_user
 from core.password_reset import (
+    PasswordResetCooldownError,
     PasswordResetDeliveryError,
     PasswordResetError,
     reset_password,
     send_password_reset_code,
 )
 from core.models import Membership, PendingRegistration, User
+from core.captcha import captcha_enabled
+from core.security import consume_browser_auth_rate_limit
 from core.tenancy import (
     ACTIVE_BUSINESS_SESSION_KEY,
     active_memberships_for,
@@ -58,6 +63,7 @@ from .forms import (
     ProductForm,
     PasswordResetConfirmForm,
     PasswordResetRequestForm,
+    ProtectedAuthenticationForm,
     SignupForm,
     TaskCompletionForm,
     TaskRescheduleForm,
@@ -76,13 +82,31 @@ def safe_post_redirect(request, fallback):
     return fallback
 
 
+class BrowserAuthRateLimitMixin:
+    """Apply cache-backed IP limits to public server-rendered auth forms."""
+
+    browser_throttle_scope = ''
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.method == 'POST' and self.browser_throttle_scope:
+            result = consume_browser_auth_rate_limit(request, self.browser_throttle_scope)
+            if not result.allowed:
+                messages.error(
+                    request,
+                    f'Too many attempts. Please try again in {result.retry_after} seconds.',
+                )
+                return redirect(request.get_full_path())
+        return super().dispatch(request, *args, **kwargs)
+
+
 class LandingView(TemplateView):
     template_name = 'web/landing.html'
 
 
-class SignupView(FormView):
+class SignupView(BrowserAuthRateLimitMixin, FormView):
     template_name = 'web/signup.html'
     form_class = SignupForm
+    browser_throttle_scope = 'web_signup'
 
     def form_valid(self, form):
         try:
@@ -111,7 +135,9 @@ class EmailVerificationSentView(TemplateView):
         return context
 
 
-class EmailVerificationResendView(View):
+class EmailVerificationResendView(BrowserAuthRateLimitMixin, View):
+    browser_throttle_scope = 'web_email_resend'
+
     def post(self, request):
         form = EmailVerificationResendForm(request.POST)
         if not form.is_valid():
@@ -125,17 +151,21 @@ class EmailVerificationResendView(View):
             messages.success(request, 'If a pending registration uses that email, a verification code is on its way.')
             return redirect('web:email-verification-sent')
 
+        request.session['pending_email_verification_registration_id'] = str(registration.pk)
         try:
             send_email_verification(registration)
+        except EmailVerificationCooldownError:
+            messages.success(request, 'If a pending registration uses that email, a verification code is on its way.')
         except EmailVerificationDeliveryError:
             messages.error(request, 'We could not resend the verification code. Please try again in a moment.')
         else:
-            request.session['pending_email_verification_registration_id'] = str(registration.pk)
             messages.success(request, 'A fresh six-digit verification code has been sent.')
         return redirect('web:email-verification-sent')
 
 
-class EmailVerificationView(View):
+class EmailVerificationView(BrowserAuthRateLimitMixin, View):
+    browser_throttle_scope = 'web_email_verify'
+
     def get(self, request):
         return redirect('web:email-verification-sent')
 
@@ -162,11 +192,12 @@ class EmailVerificationView(View):
         return redirect('web:onboarding')
 
 
-class PasswordResetRequestView(FormView):
+class PasswordResetRequestView(BrowserAuthRateLimitMixin, FormView):
     """Start a password reset without revealing whether an account exists."""
 
     template_name = 'web/password_reset_request.html'
     form_class = PasswordResetRequestForm
+    browser_throttle_scope = 'web_password_reset_request'
 
     def get_initial(self):
         initial = super().get_initial()
@@ -180,7 +211,7 @@ class PasswordResetRequestView(FormView):
         if user:
             try:
                 send_password_reset_code(user)
-            except (PasswordResetDeliveryError, PasswordResetError):
+            except (PasswordResetCooldownError, PasswordResetDeliveryError, PasswordResetError):
                 # Keep the browser response the same for known and unknown
                 # addresses so this form cannot be used to enumerate users.
                 pass
@@ -189,11 +220,12 @@ class PasswordResetRequestView(FormView):
         return redirect('web:password-reset-confirm')
 
 
-class PasswordResetConfirmView(FormView):
+class PasswordResetConfirmView(BrowserAuthRateLimitMixin, FormView):
     """Accept a reset code and a new password, then invalidate that code."""
 
     template_name = 'web/password_reset_confirm.html'
     form_class = PasswordResetConfirmForm
+    browser_throttle_scope = 'web_password_reset_confirm'
 
     def get_initial(self):
         initial = super().get_initial()
@@ -230,6 +262,17 @@ class PasswordResetConfirmView(FormView):
             return redirect('web:security-settings')
         messages.success(self.request, 'Your password has been reset. You can now sign in.')
         return redirect('web:login')
+
+
+class ProtectedLoginView(BrowserAuthRateLimitMixin, auth_views.LoginView):
+    template_name = 'web/login.html'
+    authentication_form = ProtectedAuthenticationForm
+    browser_throttle_scope = 'web_login'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['turnstile_site_key'] = settings.TURNSTILE_SITE_KEY if captcha_enabled() else ''
+        return context
 
 
 class TenantWebMixin(LoginRequiredMixin):
@@ -1247,6 +1290,7 @@ class ProfilePasswordChangeView(TenantWebMixin, View):
 
         request.user.set_password(password_form.cleaned_data['new_password'])
         request.user.save(update_fields=('password',))
+        revoke_refresh_tokens_for_user(request.user)
         update_session_auth_hash(request, request.user)
         messages.success(request, 'Your password was updated.')
         return redirect('web:security-settings')
