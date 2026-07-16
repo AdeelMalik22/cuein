@@ -11,6 +11,7 @@ The application has two first-class interfaces:
 
 - Multi-tenant businesses with owner, manager, and salesperson roles, including per-business memberships and workspace switching for shared staff.
 - Email-confirmed business registration: no `Business` or owner `User` is created until the owner enters the expiring six-digit email code.
+- Password recovery by emailed, expiring six-digit reset code; codes are hashed, single-use, and locked after five incorrect attempts.
 - A seven-stage lead pipeline: New inquiry, Contacted, Site visit, Quotation sent, Negotiation, Won, and Lost.
 - Lead quick-add, search/filtering, assignment, editing, activity timeline, and validated lost reasons.
 - Profile editing with optional profile photos, plus a photo-and-name assignee picker with a fallback avatar.
@@ -47,6 +48,8 @@ Only active members of the **currently selected workspace** are eligible. If a p
 | Sign up | `POST /api/v1/auth/signup/` |
 | Verify signup code | `POST /api/v1/auth/verify-email/` |
 | Resend signup code | `POST /api/v1/auth/verify-email/resend/` |
+| Request password-reset code | `POST /api/v1/auth/password-reset/request/` |
+| Confirm password reset | `POST /api/v1/auth/password-reset/confirm/` |
 | JWT login | `POST /api/v1/auth/token/` |
 | Refresh JWT | `POST /api/v1/auth/token/refresh/` |
 | Current user | `GET /api/v1/me/` |
@@ -60,7 +63,18 @@ Only active members of the **currently selected workspace** are eligible. If a p
 | Follow-up tasks | `/api/v1/follow-up-tasks/` |
 | Notifications | `/api/v1/notifications/` |
 
-All API routes require JWT authentication except signup, email-code verification, token creation, and token refresh. API signup creates only a temporary pending registration and returns a verification-required response; the business, owner account, and JWT access become available only after the owner enters the emailed six-digit code.
+All API routes require JWT authentication except signup, email-code verification, password-reset request/confirmation, token creation, and token refresh. API signup creates only a temporary pending registration and returns a verification-required response; the business, owner account, and JWT access become available only after the owner enters the emailed six-digit code.
+
+To reset a password through the API, request a code with an email address, then submit that email, the six-digit code, and the new password:
+
+```json
+POST /api/v1/auth/password-reset/confirm/
+{
+  "email": "owner@example.com",
+  "code": "123456",
+  "new_password": "your-new-strong-password"
+}
+```
 
 For an account with more than one workspace, obtain a token for a specific business:
 
@@ -97,9 +111,10 @@ For an account with more than one workspace, obtain a token for a specific busin
    EMAIL_USE_TLS=true
    EMAIL_USE_SSL=false
    EMAIL_VERIFICATION_TIMEOUT=86400
+   PASSWORD_RESET_TIMEOUT=900
    ```
 
-   Codes expire after 24 hours by default; change `EMAIL_VERIFICATION_TIMEOUT` in seconds if needed. In local development, email uses Django’s console backend by default, so the verification code is printed in the server terminal.
+   Signup verification codes expire after 24 hours by default; password-reset codes expire after 15 minutes. Change either timeout in seconds if needed. In local development, email uses Django’s console backend by default, so the verification code is printed in the server terminal.
 
 3. Install dependencies, migrate, and validate the project:
 

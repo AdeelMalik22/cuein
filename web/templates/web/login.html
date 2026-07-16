@@ -30,9 +30,15 @@
           </span>
           {% if form.errors %}<p id="login-credentials-error" class="form-error login-credentials-error" role="alert">That username or password doesn’t match. Check both and try again.</p>{% endif %}
         </div>
+        <p class="auth-switch field-wide"><a href="{% url 'web:password-reset-request' %}">Forgot your password?</a></p>
         <input type="hidden" name="next" value="{{ next }}">
         <button class="button button-dark field-wide" type="submit">Sign in <span aria-hidden="true">→</span></button>
       </form>
+      {% if messages %}
+        <div class="verification-messages" aria-live="polite">
+          {% for message in messages %}<p class="verification-message {% if message.tags %}{{ message.tags }}{% endif %}">{{ message }}</p>{% endfor %}
+        </div>
+      {% endif %}
       <p class="auth-switch">New here? <a href="{% url 'web:signup' %}">Register your business</a></p>
     </section>
   </main>

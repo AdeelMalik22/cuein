@@ -6,6 +6,7 @@ from .views import (
     EmailVerificationView, LandingView, LeadActivityCreateView, LeadCreateView,
     LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageListView, LeadStageUpdateView,
     LeadUpdateView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ProfileView, ReportsView,
+    PasswordResetConfirmView, PasswordResetRequestView,
     SignupView, TaskCompleteView, TaskListView, TaskRescheduleView, TeamDeleteView, TeamEditView,
     TeamListView, WorkspaceSwitchView,
 )
@@ -18,6 +19,8 @@ urlpatterns = [
     path('verify-email/sent/', EmailVerificationSentView.as_view(), name='email-verification-sent'),
     path('verify-email/resend/', EmailVerificationResendView.as_view(), name='email-verification-resend'),
     path('verify-email/', EmailVerificationView.as_view(), name='email-verify'),
+    path('forgot-password/', PasswordResetRequestView.as_view(), name='password-reset-request'),
+    path('reset-password/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
     path('login/', auth_views.LoginView.as_view(template_name='web/login.html'), name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('workspaces/switch/', WorkspaceSwitchView.as_view(), name='workspace-switch'),
