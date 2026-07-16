@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import login
+from django.contrib.auth import login, update_session_auth_hash
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
@@ -47,6 +47,7 @@ from leads.models import Activity, Lead, Product
 from .forms import (
     ActivityForm,
     BusinessForm,
+    CurrentPasswordChangeForm,
     EmailVerificationCodeForm,
     EmailVerificationResendForm,
     LeadDetailsForm,
@@ -167,6 +168,12 @@ class PasswordResetRequestView(FormView):
     template_name = 'web/password_reset_request.html'
     form_class = PasswordResetRequestForm
 
+    def get_initial(self):
+        initial = super().get_initial()
+        if self.request.user.is_authenticated and self.request.user.email:
+            initial['email'] = self.request.user.email
+        return initial
+
     def form_valid(self, form):
         email = form.cleaned_data['email']
         user = User.objects.filter(email__iexact=email, is_active=True).first()
@@ -202,8 +209,12 @@ class PasswordResetConfirmView(FormView):
         return context
 
     def form_valid(self, form):
+        # Resolve the lazy user before changing the password. Otherwise the
+        # authentication middleware compares the old session hash with the
+        # newly saved password and turns this request into AnonymousUser.
+        signed_in_user_id = self.request.user.pk if self.request.user.is_authenticated else None
         try:
-            reset_password(
+            user = reset_password(
                 form.cleaned_data['email'],
                 form.cleaned_data['code'],
                 form.cleaned_data['new_password'],
@@ -213,6 +224,10 @@ class PasswordResetConfirmView(FormView):
             return self.form_invalid(form)
 
         self.request.session.pop(PASSWORD_RESET_EMAIL_SESSION_KEY, None)
+        if signed_in_user_id == user.pk:
+            update_session_auth_hash(self.request, user)
+            messages.success(self.request, 'Your password has been reset.')
+            return redirect('web:security-settings')
         messages.success(self.request, 'Your password has been reset. You can now sign in.')
         return redirect('web:login')
 
@@ -1200,12 +1215,41 @@ class ProfileView(TenantWebMixin, UpdateView):
     def form_valid(self, form):
         form.save()
         messages.success(self.request, 'Your profile was updated.')
-        return redirect('web:profile')
+        return redirect('web:account-settings-profile')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.update(self.common_context())
         return context
+
+
+class SecuritySettingsView(TenantWebMixin, TemplateView):
+    """Account security settings that are available today."""
+
+    template_name = 'web/security_settings.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['password_form'] = CurrentPasswordChangeForm(user=self.request.user)
+        context.update(self.common_context())
+        return context
+
+
+class ProfilePasswordChangeView(TenantWebMixin, View):
+    """Change the signed-in user's password after checking their current one."""
+
+    def post(self, request):
+        password_form = CurrentPasswordChangeForm(request.POST, user=request.user)
+        if not password_form.is_valid():
+            context = {'password_form': password_form}
+            context.update(self.common_context())
+            return render(request, 'web/security_settings.html', context)
+
+        request.user.set_password(password_form.cleaned_data['new_password'])
+        request.user.save(update_fields=('password',))
+        update_session_auth_hash(request, request.user)
+        messages.success(request, 'Your password was updated.')
+        return redirect('web:security-settings')
 
 
 class BusinessSettingsView(OwnerRequiredMixin, FormView):

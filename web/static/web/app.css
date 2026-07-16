@@ -2346,6 +2346,43 @@ input::placeholder, textarea::placeholder {
     max-width: 900px;
 }
 
+.settings-layout.business-settings-layout {
+    gap: 2rem;
+    grid-template-columns: minmax(470px, 1.1fr) minmax(280px, .75fr);
+    max-width: 1180px;
+}
+
+.business-details-panel {
+    padding: 2rem;
+}
+
+.business-details-panel .stacked-form {
+    margin-top: 1.5rem;
+    max-width: 560px;
+}
+
+.business-details-panel .field {
+    gap: .5rem;
+}
+
+.business-details-panel input,
+.business-details-panel select {
+    font-size: 1rem;
+    min-height: 3.35rem;
+}
+
+.business-details-panel .button {
+    margin-top: .25rem;
+    min-width: 210px;
+}
+
+@media (max-width: 1120px) {
+    .settings-layout.business-settings-layout {
+        grid-template-columns: minmax(0, 1fr);
+        max-width: 680px;
+    }
+}
+
 .settings-note {
     border-left: 1px solid var(--line-dark);
     margin-top: 1.3rem;
@@ -5760,6 +5797,53 @@ body.task-queue-page .task-page-summary i {
     color: var(--accent-dark);
 }
 
+.settings-layout {
+    align-items: start;
+    display: grid;
+    gap: .9rem;
+    grid-template-columns: minmax(220px, .42fr) minmax(0, 1fr);
+    max-width: 900px;
+    padding-bottom: 2rem;
+}
+
+.settings-nav-panel {
+    padding: 1rem;
+}
+
+.settings-nav {
+    display: grid;
+    gap: .35rem;
+    margin-top: .7rem;
+}
+
+.settings-nav-link {
+    border-radius: .55rem;
+    color: var(--muted);
+    display: block;
+    padding: .7rem .75rem;
+}
+
+.settings-nav-link:hover,
+.settings-nav-link.is-active {
+    background: var(--surface-muted);
+    color: var(--ink);
+}
+
+.settings-nav-link strong,
+.settings-nav-link small {
+    display: block;
+}
+
+.settings-nav-link strong {
+    font-size: .82rem;
+}
+
+.settings-nav-link small {
+    font-size: .7rem;
+    line-height: 1.35;
+    margin-top: .12rem;
+}
+
 .profile-layout {
     align-items: start;
     display: grid;
@@ -5785,6 +5869,28 @@ body.task-queue-page .task-page-summary i {
 
 .profile-summary-panel h2 {
     font-size: 1.7rem;
+}
+
+.profile-security-section {
+    border-top: 1px solid var(--line);
+    margin-top: 2rem;
+    padding-top: 1.7rem;
+}
+
+.profile-password-form {
+    margin-top: 1.2rem;
+    max-width: 480px;
+}
+
+.profile-password-recovery {
+    color: var(--muted);
+    font-size: .82rem;
+    margin: -.3rem 0 .2rem;
+}
+
+.profile-password-recovery a {
+    color: var(--ink);
+    font-weight: 700;
 }
 
 .profile-summary-email {
@@ -6140,7 +6246,8 @@ body.task-queue-page .task-page-summary i {
         min-width: min(248px, calc(100vw - 2rem));
     }
 
-    .profile-layout {
+    .profile-layout,
+    .settings-layout {
         grid-template-columns: 1fr;
     }
 }
