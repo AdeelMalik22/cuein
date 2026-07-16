@@ -10,11 +10,13 @@ from rest_framework.views import APIView
 from .authentication import select_token_membership, token_pair_for_membership
 from .email_verification import (
     activate_pending_registration,
+    EmailVerificationCooldownError,
     EmailVerificationDeliveryError,
     EmailVerificationError,
     send_email_verification,
 )
 from .password_reset import (
+    PasswordResetCooldownError,
     PasswordResetDeliveryError,
     PasswordResetError,
     reset_password,
@@ -125,6 +127,10 @@ class ResendVerificationCodeView(PublicAuthAPIView):
 
         try:
             send_email_verification(registration)
+        except EmailVerificationCooldownError:
+            # Match the unknown-address response so resend requests cannot
+            # reveal whether an address has a pending registration.
+            pass
         except EmailVerificationDeliveryError:
             return Response(
                 {'detail': 'We could not send the verification code. Please try again in a moment.'},
@@ -148,7 +154,7 @@ class PasswordResetRequestView(PublicAuthAPIView):
         if user:
             try:
                 send_password_reset_code(user)
-            except (PasswordResetDeliveryError, PasswordResetError):
+            except (PasswordResetCooldownError, PasswordResetDeliveryError, PasswordResetError):
                 # The public response must remain the same, otherwise this
                 # endpoint would disclose which email addresses have accounts.
                 pass

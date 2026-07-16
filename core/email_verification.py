@@ -1,6 +1,7 @@
 """Expiring six-digit verification codes for pending workspace registrations."""
 
 import logging
+import math
 import secrets
 from datetime import timedelta
 
@@ -27,6 +28,14 @@ class EmailVerificationDeliveryError(RuntimeError):
     """The verification message could not be handed to the configured backend."""
 
 
+class EmailVerificationCooldownError(EmailVerificationError):
+    """A recent code is still valid, so sending another would be abusive."""
+
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__('A verification code was sent too recently.')
+
+
 def _new_verification_code() -> str:
     return f'{secrets.randbelow(10 ** VERIFICATION_CODE_LENGTH):0{VERIFICATION_CODE_LENGTH}d}'
 
@@ -38,12 +47,25 @@ def _verification_expired(registration: PendingRegistration) -> bool:
     return timezone.now() >= expires_at
 
 
+def _verification_resend_retry_after(registration: PendingRegistration) -> int:
+    if not registration.verification_sent_at:
+        return 0
+    available_at = registration.verification_sent_at + timedelta(
+        seconds=settings.EMAIL_VERIFICATION_RESEND_COOLDOWN,
+    )
+    return max(0, math.ceil((available_at - timezone.now()).total_seconds()))
+
+
 def send_email_verification(registration: PendingRegistration) -> None:
     """Issue a fresh code. Only the hash is persisted, and only after send succeeds."""
-    code = _new_verification_code()
     try:
         with transaction.atomic():
             registration = PendingRegistration.objects.select_for_update().get(pk=registration.pk)
+            retry_after = _verification_resend_retry_after(registration)
+            if retry_after:
+                raise EmailVerificationCooldownError(retry_after)
+
+            code = _new_verification_code()
             registration.verification_code_hash = make_password(code)
             registration.verification_attempts = 0
             registration.verification_sent_at = timezone.now()
@@ -67,6 +89,8 @@ def send_email_verification(registration: PendingRegistration) -> None:
             if sent_count != 1:
                 raise EmailVerificationDeliveryError('Unable to send the verification email.')
     except EmailVerificationDeliveryError:
+        raise
+    except EmailVerificationCooldownError:
         raise
     except PendingRegistration.DoesNotExist as error:
         raise EmailVerificationError('This registration is no longer available.') from error

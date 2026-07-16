@@ -2,6 +2,7 @@ from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
+from .authentication import revoke_refresh_tokens_for_user
 from .models import Business, Membership, PendingRegistration, User
 from .tenancy import active_business, default_active_membership_for, request_membership
 
@@ -132,6 +133,8 @@ class TeamUserSerializer(serializers.ModelSerializer):
             # disables a person's other workspaces.
             instance.is_active = True
         instance.save()
+        if password:
+            revoke_refresh_tokens_for_user(instance)
         membership = Membership.objects.get(
             user=instance,
             business=active_business(self.context['request']),

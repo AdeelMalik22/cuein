@@ -1,4 +1,5 @@
 from django import forms
+from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -7,7 +8,9 @@ from django.utils import timezone
 from django.utils.text import slugify
 from zoneinfo import available_timezones
 
+from core.captcha import captcha_enabled, verify_turnstile
 from core.models import Business, Membership, PendingRegistration, User
+from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product
@@ -39,6 +42,49 @@ TIMEZONE_VALUES = {
     for value, _label in group_choices
 }
 TIMEZONE_VALUES.add('UTC')
+
+
+class ProtectedAuthenticationForm(AuthenticationForm):
+    """Normal Django login with progressive delay and optional CAPTCHA checks."""
+
+    captcha_token = forms.CharField(required=False, widget=forms.HiddenInput)
+    captcha_required = False
+    protection_error = ''
+
+    def _credential(self) -> str:
+        credential = self.cleaned_data.get('username')
+        if credential is None and self.is_bound:
+            credential = self.data.get('username', '')
+        return str(credential or '').strip()
+
+    def clean(self):
+        credential = self._credential()
+        if credential:
+            state = login_attempt_state(self.request, credential)
+            self.captcha_required = state.captcha_required and captcha_enabled()
+            if state.retry_after:
+                self.protection_error = (
+                    f'Too many sign-in attempts. Please try again in {state.retry_after} seconds.'
+                )
+                raise ValidationError(self.protection_error)
+            if self.captcha_required and not verify_turnstile(
+                self.cleaned_data.get('captcha_token', ''),
+                client_ip(self.request),
+            ):
+                self.protection_error = 'Please complete the security check before signing in.'
+                raise ValidationError(self.protection_error)
+
+        try:
+            cleaned_data = super().clean()
+        except ValidationError:
+            if credential:
+                state = record_failed_login(self.request, credential)
+                self.captcha_required = state.captcha_required and captcha_enabled()
+            raise
+
+        if credential:
+            clear_login_failures(self.request, credential)
+        return cleaned_data
 
 
 class AvatarRadioSelect(forms.RadioSelect):

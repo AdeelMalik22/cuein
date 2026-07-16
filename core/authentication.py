@@ -55,6 +55,14 @@ def token_pair_for_membership(user, membership):
     }
 
 
+def revoke_refresh_tokens_for_user(user) -> None:
+    """Blacklist every issued refresh token after a password reset."""
+    from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+
+    for token in OutstandingToken.objects.filter(user=user).iterator():
+        BlacklistedToken.objects.get_or_create(token=token)
+
+
 class BusinessScopedJWTAuthentication(JWTAuthentication):
     """Accept only access tokens tied to a currently active membership."""
 
