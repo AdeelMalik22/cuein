@@ -101,7 +101,7 @@ class ProfileAndAvatarTests(TestCase):
         )
 
         self.owner.refresh_from_db()
-        self.assertRedirects(response, reverse('web:profile'))
+        self.assertRedirects(response, reverse('web:account-settings-profile'))
         self.assertEqual(self.owner.username, 'adeel-ahmed')
         self.assertEqual(self.owner.email, 'adeel@northstar.example')
         self.assertTrue(self.owner.profile_picture.name.startswith('profile_pictures/'))
@@ -157,14 +157,114 @@ class ProfileAndAvatarTests(TestCase):
         self.assertEqual(lead.assigned_user, self.teammate)
 
     def test_account_menu_and_management_status_switches_are_available(self):
-        profile_response = self.client.get(reverse('web:profile'))
+        profile_response = self.client.get(reverse('web:account-settings-profile'))
+        security_response = self.client.get(reverse('web:security-settings'))
         team_response = self.client.get(reverse('web:team-list'))
         service_response = self.client.get(reverse('web:product-list'))
 
         self.assertContains(profile_response, 'Save profile')
+        self.assertContains(profile_response, 'Settings')
+        self.assertContains(profile_response, 'Personal information')
+        self.assertContains(profile_response, reverse('web:security-settings'))
+        self.assertContains(security_response, 'Password')
+        self.assertContains(security_response, 'Forgot your current password?')
         self.assertContains(profile_response, 'Log out')
+        self.assertContains(profile_response, 'Workspace settings')
+        self.assertNotContains(profile_response, '<span>Settings</span>')
         self.assertContains(team_response, 'status-toggle')
         self.assertContains(service_response, 'status-toggle')
+
+    def test_signed_in_user_can_change_password_from_security_settings_and_keep_their_session(self):
+        security_response = self.client.get(reverse('web:security-settings'))
+
+        self.assertContains(security_response, 'Password')
+        self.assertContains(security_response, 'Forgot your current password?')
+        self.assertContains(security_response, reverse('web:security-password-change'))
+
+        response = self.client.post(
+            reverse('web:security-password-change'),
+            {
+                'current_password': 'test-password',
+                'new_password': 'Profile-new-passphrase-5172!',
+                'new_password_confirmation': 'Profile-new-passphrase-5172!',
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertRedirects(response, reverse('web:security-settings'))
+        self.assertTrue(self.owner.check_password('Profile-new-passphrase-5172!'))
+        self.assertEqual(self.client.get(reverse('web:security-settings')).status_code, 200)
+
+    def test_security_password_change_rejects_an_incorrect_current_password(self):
+        response = self.client.post(
+            reverse('web:security-password-change'),
+            {
+                'current_password': 'incorrect-password',
+                'new_password': 'Profile-new-passphrase-5172!',
+                'new_password_confirmation': 'Profile-new-passphrase-5172!',
+            },
+        )
+
+        self.owner.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Your current password is incorrect.')
+        self.assertTrue(self.owner.check_password('test-password'))
+
+
+class BusinessSettingsTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(
+            name='North Star Solar',
+            industry=Business.Industry.SOLAR,
+            timezone='Asia/Karachi',
+        )
+        self.owner = User.objects.create_user(
+            username='owner',
+            password='test-password',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        self.client.force_login(self.owner)
+
+    def test_business_details_are_wider_and_offer_grouped_timezone_choices(self):
+        response = self.client.get(reverse('web:business-settings'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'business-settings-layout')
+        self.assertContains(response, 'Business details')
+        self.assertContains(response, 'Time zone')
+        self.assertContains(response, 'Choose the time zone where your team normally works.')
+        self.assertContains(response, '<optgroup label="Asia">')
+        self.assertContains(response, 'Asia/Karachi')
+
+    def test_owner_can_choose_a_timezone_from_the_dropdown(self):
+        response = self.client.post(
+            reverse('web:business-settings'),
+            {
+                'name': 'North Star Solar',
+                'industry': Business.Industry.SOLAR,
+                'timezone': 'Europe/London',
+            },
+        )
+
+        self.business.refresh_from_db()
+        self.assertRedirects(response, reverse('web:business-settings'))
+        self.assertEqual(self.business.timezone, 'Europe/London')
+
+    def test_invalid_timezone_is_rejected(self):
+        response = self.client.post(
+            reverse('web:business-settings'),
+            {
+                'name': self.business.name,
+                'industry': self.business.industry,
+                'timezone': 'Not/A-Timezone',
+            },
+        )
+
+        self.business.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Select a valid choice.')
+        self.assertEqual(self.business.timezone, 'Asia/Karachi')
 
 
 class DashboardAnalyticsTests(TestCase):
@@ -444,6 +544,36 @@ class PasswordResetWebTests(TestCase):
         self.assertRedirects(response, reverse('web:login'))
         self.assertTrue(self.user.check_password('Unique-reset-passphrase-5172!'))
         self.assertFalse(PasswordResetRequest.objects.filter(user=self.user).exists())
+
+    def test_signed_in_user_can_recover_with_a_code_and_stay_signed_in(self):
+        self.client.force_login(self.user)
+        request_page = self.client.get(reverse('web:password-reset-request'))
+
+        self.assertContains(request_page, f'value="{self.user.email}"')
+
+        PasswordResetRequest.objects.create(
+            user=self.user,
+            code_hash=make_password('123456'),
+            sent_at=timezone.now(),
+        )
+        session = self.client.session
+        session['password_reset_email'] = self.user.email
+        session.save()
+
+        response = self.client.post(
+            reverse('web:password-reset-confirm'),
+            {
+                'email': self.user.email,
+                'code': '123456',
+                'new_password': 'Recovered-while-signed-in-5172!',
+                'new_password_confirmation': 'Recovered-while-signed-in-5172!',
+            },
+        )
+
+        self.user.refresh_from_db()
+        self.assertRedirects(response, reverse('web:security-settings'))
+        self.assertTrue(self.user.check_password('Recovered-while-signed-in-5172!'))
+        self.assertEqual(self.client.get(reverse('web:security-settings')).status_code, 200)
 
 
 class LeadBoardPaginationTests(TestCase):

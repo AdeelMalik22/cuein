@@ -1,0 +1,23 @@
+{% extends 'web/base.html' %}
+{% block title %}Security settings · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading profile-page-heading">
+    <div><p class="eyebrow">MY ACCOUNT</p><h1>Settings</h1><p>Manage your profile and account security.</p></div>
+  </section>
+  <section class="settings-layout">
+    {% include 'web/components/settings_nav.html' with settings_section='security' %}
+    <article class="panel settings-content-panel">
+      <div class="panel-heading"><div><p class="eyebrow">SECURITY</p><h2>Password</h2></div></div>
+      <p class="panel-intro">Use your current password to choose a new one. You’ll stay signed in on this device.</p>
+      <form method="post" action="{% url 'web:security-password-change' %}" class="stacked-form profile-password-form">
+        {% csrf_token %}
+        {% if password_form.non_field_errors %}<div class="form-errors">{{ password_form.non_field_errors }}</div>{% endif %}
+        <label class="field"><span>Current password</span>{{ password_form.current_password }}{% for error in password_form.current_password.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <p class="profile-password-recovery"><a href="{% url 'web:password-reset-request' %}">Forgot your current password?</a> We’ll email you a six-digit reset code instead.</p>
+        <label class="field"><span>New password</span>{{ password_form.new_password }}{% for error in password_form.new_password.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <label class="field"><span>Confirm new password</span>{{ password_form.new_password_confirmation }}{% for error in password_form.new_password_confirmation.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <div class="form-actions"><button class="button button-dark" type="submit">Update password</button></div>
+      </form>
+    </article>
+  </section>
+{% endblock %}

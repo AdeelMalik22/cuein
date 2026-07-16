@@ -1,0 +1,11 @@
+<aside class="panel settings-nav-panel">
+  <p class="eyebrow">SETTINGS</p>
+  <nav class="settings-nav" aria-label="Settings navigation">
+    <a class="settings-nav-link {% if settings_section == 'profile' %}is-active{% endif %}" href="{% url 'web:account-settings-profile' %}"{% if settings_section == 'profile' %} aria-current="page"{% endif %}>
+      <strong>Profile</strong><small>Personal information and avatar</small>
+    </a>
+    <a class="settings-nav-link {% if settings_section == 'security' %}is-active{% endif %}" href="{% url 'web:security-settings' %}"{% if settings_section == 'security' %} aria-current="page"{% endif %}>
+      <strong>Security</strong><small>Password</small>
+    </a>
+  </nav>
+</aside>

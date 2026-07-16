@@ -1,23 +1,13 @@
 {% extends 'web/base.html' %}
-{% block title %}My profile · Cuein{% endblock %}
+{% block title %}Settings · Cuein{% endblock %}
 {% block content %}
   <section class="page-heading profile-page-heading">
-    <div><p class="eyebrow">MY ACCOUNT</p><h1>Your profile</h1><p>Keep your contact details and profile picture up to date.</p></div>
+    <div><p class="eyebrow">MY ACCOUNT</p><h1>Settings</h1><p>Manage your profile and account security.</p></div>
   </section>
-  <section class="profile-layout">
-    <aside class="panel profile-summary-panel">
-      <div class="profile-summary-avatar">{% include 'web/components/profile_avatar.html' with avatar_user=request.user avatar_class='avatar profile-avatar-large' %}</div>
-      <p class="eyebrow">SIGNED IN AS</p>
-      <h2>{{ request.user.get_full_name|default:request.user.username }}</h2>
-      <p class="profile-summary-email">{{ request.user.email|default:request.user.username }}</p>
-      <dl class="profile-facts">
-        <div><dt>Workspace</dt><dd>{{ business.name }}</dd></div>
-        <div><dt>Role in {{ business.name }}</dt><dd>{{ active_membership.get_role_display }}</dd></div>
-        <div><dt>Member since</dt><dd>{{ request.user.date_joined|date:'M j, Y' }}</dd></div>
-      </dl>
-    </aside>
-    <article class="panel profile-form-panel">
-      <div class="panel-heading"><div><p class="eyebrow">ACCOUNT DETAILS</p><h2>Personal information</h2></div></div>
+  <section class="settings-layout">
+    {% include 'web/components/settings_nav.html' with settings_section='profile' %}
+    <article class="panel settings-content-panel">
+      <div class="panel-heading"><div><p class="eyebrow">PROFILE</p><h2>Personal information</h2></div></div>
       <p class="panel-intro">Your username and email address must be unique across Cuein.</p>
       <form method="post" enctype="multipart/form-data" class="stacked-form profile-form">
         {% csrf_token %}
