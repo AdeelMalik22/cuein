@@ -5,11 +5,40 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
+from zoneinfo import available_timezones
 
 from core.models import Business, Membership, PendingRegistration, User
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product
+
+
+TIMEZONE_REGIONS = (
+    'Africa', 'America', 'Antarctica', 'Arctic', 'Asia', 'Atlantic',
+    'Australia', 'Europe', 'Indian', 'Pacific',
+)
+
+
+def timezone_choices():
+    """Return common IANA location zones in concise, browsable region groups."""
+    available = available_timezones()
+    choices = [('UTC', 'UTC (Coordinated Universal Time)')]
+    for region in TIMEZONE_REGIONS:
+        prefix = f'{region}/'
+        region_zones = sorted(zone for zone in available if zone.startswith(prefix))
+        if region_zones:
+            choices.append((region, [(zone, zone.replace('_', ' ')) for zone in region_zones]))
+    return choices
+
+
+TIMEZONE_CHOICES = timezone_choices()
+TIMEZONE_VALUES = {
+    value
+    for _group, group_choices in TIMEZONE_CHOICES
+    if isinstance(group_choices, (list, tuple))
+    for value, _label in group_choices
+}
+TIMEZONE_VALUES.add('UTC')
 
 
 class AvatarRadioSelect(forms.RadioSelect):
@@ -339,9 +368,22 @@ class ProductForm(forms.ModelForm):
 
 
 class BusinessForm(forms.ModelForm):
+    timezone = forms.ChoiceField(choices=TIMEZONE_CHOICES, label='Time zone')
+
     class Meta:
         model = Business
         fields = ('name', 'industry', 'timezone')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current_timezone = self.instance.timezone if self.instance and self.instance.pk else ''
+        if current_timezone and current_timezone not in TIMEZONE_VALUES:
+            # Preserve a legacy value long enough for an owner to choose a
+            # replacement rather than making an existing workspace unsaveable.
+            self.fields['timezone'].choices = [
+                ('Current value', [(current_timezone, current_timezone)]),
+                *TIMEZONE_CHOICES,
+            ]
 
 
 class LeadQuickAddForm(forms.ModelForm):

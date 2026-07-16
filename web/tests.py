@@ -211,6 +211,62 @@ class ProfileAndAvatarTests(TestCase):
         self.assertTrue(self.owner.check_password('test-password'))
 
 
+class BusinessSettingsTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(
+            name='North Star Solar',
+            industry=Business.Industry.SOLAR,
+            timezone='Asia/Karachi',
+        )
+        self.owner = User.objects.create_user(
+            username='owner',
+            password='test-password',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        self.client.force_login(self.owner)
+
+    def test_business_details_are_wider_and_offer_grouped_timezone_choices(self):
+        response = self.client.get(reverse('web:business-settings'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'business-settings-layout')
+        self.assertContains(response, 'Business details')
+        self.assertContains(response, 'Time zone')
+        self.assertContains(response, 'Choose the time zone where your team normally works.')
+        self.assertContains(response, '<optgroup label="Asia">')
+        self.assertContains(response, 'Asia/Karachi')
+
+    def test_owner_can_choose_a_timezone_from_the_dropdown(self):
+        response = self.client.post(
+            reverse('web:business-settings'),
+            {
+                'name': 'North Star Solar',
+                'industry': Business.Industry.SOLAR,
+                'timezone': 'Europe/London',
+            },
+        )
+
+        self.business.refresh_from_db()
+        self.assertRedirects(response, reverse('web:business-settings'))
+        self.assertEqual(self.business.timezone, 'Europe/London')
+
+    def test_invalid_timezone_is_rejected(self):
+        response = self.client.post(
+            reverse('web:business-settings'),
+            {
+                'name': self.business.name,
+                'industry': self.business.industry,
+                'timezone': 'Not/A-Timezone',
+            },
+        )
+
+        self.business.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Select a valid choice.')
+        self.assertEqual(self.business.timezone, 'Asia/Karachi')
+
+
 class DashboardAnalyticsTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name='North Star Solar')

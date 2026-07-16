@@ -2346,6 +2346,43 @@ input::placeholder, textarea::placeholder {
     max-width: 900px;
 }
 
+.settings-layout.business-settings-layout {
+    gap: 2rem;
+    grid-template-columns: minmax(470px, 1.1fr) minmax(280px, .75fr);
+    max-width: 1180px;
+}
+
+.business-details-panel {
+    padding: 2rem;
+}
+
+.business-details-panel .stacked-form {
+    margin-top: 1.5rem;
+    max-width: 560px;
+}
+
+.business-details-panel .field {
+    gap: .5rem;
+}
+
+.business-details-panel input,
+.business-details-panel select {
+    font-size: 1rem;
+    min-height: 3.35rem;
+}
+
+.business-details-panel .button {
+    margin-top: .25rem;
+    min-width: 210px;
+}
+
+@media (max-width: 1120px) {
+    .settings-layout.business-settings-layout {
+        grid-template-columns: minmax(0, 1fr);
+        max-width: 680px;
+    }
+}
+
 .settings-note {
     border-left: 1px solid var(--line-dark);
     margin-top: 1.3rem;

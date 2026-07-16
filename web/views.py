@@ -226,7 +226,7 @@ class PasswordResetConfirmView(FormView):
         self.request.session.pop(PASSWORD_RESET_EMAIL_SESSION_KEY, None)
         if signed_in_user_id == user.pk:
             update_session_auth_hash(self.request, user)
-            messages.success(self.request, 'Your password has been reset. You are still signed in.')
+            messages.success(self.request, 'Your password has been reset.')
             return redirect('web:security-settings')
         messages.success(self.request, 'Your password has been reset. You can now sign in.')
         return redirect('web:login')
@@ -1248,7 +1248,7 @@ class ProfilePasswordChangeView(TenantWebMixin, View):
         request.user.set_password(password_form.cleaned_data['new_password'])
         request.user.save(update_fields=('password',))
         update_session_auth_hash(request, request.user)
-        messages.success(request, 'Your password was updated. You are still signed in.')
+        messages.success(request, 'Your password was updated.')
         return redirect('web:security-settings')
 
 
