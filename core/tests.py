@@ -1,14 +1,29 @@
 from datetime import timedelta
+from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core import mail
+from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
+from rest_framework.throttling import ScopedRateThrottle
 
 from .models import Business, PasswordResetRequest, PendingRegistration, User
+
+
+PUBLIC_AUTH_THROTTLE_TEST_RATES = {
+    'auth_signup': '2/minute',
+    'auth_email_verify': '2/minute',
+    'auth_email_resend': '2/minute',
+    'auth_password_reset_request': '2/minute',
+    'auth_password_reset_confirm': '2/minute',
+    'auth_token': '2/minute',
+    'auth_token_refresh': '2/minute',
+}
 
 
 class CurrentUserApiTests(APITestCase):
@@ -266,3 +281,46 @@ class PasswordResetApiTests(APITestCase):
         self.assertEqual(reset_request.attempts, 5)
         self.assertEqual(locked_response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(self.user.check_password('Original-password-5172!'))
+
+
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'public-auth-throttle-tests',
+        },
+    },
+)
+class PublicAuthThrottlingTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def test_every_public_auth_throttle_scope_has_a_default_rate(self):
+        configured_rates = settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']
+
+        self.assertTrue(PUBLIC_AUTH_THROTTLE_TEST_RATES.keys() <= configured_rates.keys())
+
+    @patch.object(ScopedRateThrottle, 'THROTTLE_RATES', PUBLIC_AUTH_THROTTLE_TEST_RATES)
+    def test_every_public_auth_endpoint_returns_429_after_its_limit(self):
+        endpoint_names = (
+            'signup',
+            'email_verify',
+            'email_verify_resend',
+            'password_reset_request',
+            'password_reset_confirm',
+            'token_obtain_pair',
+            'token_refresh',
+        )
+
+        for endpoint_name in endpoint_names:
+            with self.subTest(endpoint=endpoint_name):
+                url = reverse(endpoint_name)
+                for _ in range(2):
+                    response = self.client.post(url, {}, format='json')
+                    self.assertNotEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+                throttled_response = self.client.post(url, {}, format='json')
+
+                self.assertEqual(throttled_response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+                self.assertIn('Retry-After', throttled_response)

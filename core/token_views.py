@@ -1,8 +1,9 @@
 """JWT token endpoint kept separate from configured authentication classes."""
 
 from rest_framework import serializers
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .authentication import select_token_membership, token_pair_for_membership
 
@@ -19,3 +20,10 @@ class BusinessTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class BusinessTokenObtainPairView(TokenObtainPairView):
     serializer_class = BusinessTokenObtainPairSerializer
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = 'auth_token'
+
+
+class BusinessTokenRefreshView(TokenRefreshView):
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = 'auth_token_refresh'

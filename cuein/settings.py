@@ -184,6 +184,18 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    # Scoped throttles below apply only to public authentication routes. They
+    # use the shared Redis cache configured in CACHES, so limits hold across
+    # application workers.
+    'DEFAULT_THROTTLE_RATES': {
+        'auth_signup': '5/hour',
+        'auth_email_verify': '10/hour',
+        'auth_email_resend': '3/hour',
+        'auth_password_reset_request': '3/hour',
+        'auth_password_reset_confirm': '10/hour',
+        'auth_token': '10/minute',
+        'auth_token_refresh': '30/minute',
+    },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
