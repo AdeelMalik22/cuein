@@ -5,6 +5,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .authentication import revoke_refresh_tokens_for_user
+from .membership_services import LastActiveOwnerError, update_membership
 from .models import Business, Membership, PendingRegistration, User
 from .tenancy import active_business, default_active_membership_for, request_membership
 from .validators import validate_iana_timezone
@@ -159,31 +160,30 @@ class TeamUserSerializer(serializers.ModelSerializer):
         password = validated_data.pop('password', None)
         role = validated_data.pop('role', None)
         membership_is_active = validated_data.pop('is_active', None)
-        for attribute, value in validated_data.items():
-            setattr(instance, attribute, value)
-        if password:
-            instance.set_password(password)
-        if membership_is_active is True:
-            # Preserve the old reactivation behavior while membership status
-            # becomes workspace-scoped.  Deactivating one membership never
-            # disables a person's other workspaces.
-            instance.is_active = True
-        instance.save()
-        if password:
-            revoke_refresh_tokens_for_user(instance)
-        membership = Membership.objects.get(
-            user=instance,
-            business=active_business(self.context['request']),
-        )
-        update_fields = []
-        if role is not None:
-            membership.role = role
-            update_fields.append('role')
-        if membership_is_active is not None:
-            membership.is_active = membership_is_active
-            update_fields.append('is_active')
-        if update_fields:
-            membership.save(update_fields=update_fields)
+        business = active_business(self.context['request'])
+        with transaction.atomic():
+            for attribute, value in validated_data.items():
+                setattr(instance, attribute, value)
+            if password:
+                instance.set_password(password)
+            if membership_is_active is True:
+                # Preserve the old reactivation behavior while membership status
+                # becomes workspace-scoped.  Deactivating one membership never
+                # disables a person's other workspaces.
+                instance.is_active = True
+            instance.save()
+            if password:
+                revoke_refresh_tokens_for_user(instance)
+            membership = Membership.objects.get(user=instance, business=business)
+            try:
+                update_membership(
+                    membership_id=membership.id,
+                    business=business,
+                    role=role,
+                    is_active=membership_is_active,
+                )
+            except LastActiveOwnerError as error:
+                raise serializers.ValidationError({'role': str(error)}) from error
         return instance
 
     def to_representation(self, instance):

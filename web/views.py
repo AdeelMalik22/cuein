@@ -32,6 +32,7 @@ from core.password_reset import (
     send_password_reset_code,
 )
 from core.models import Membership, PendingRegistration, User
+from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
 from core.security import consume_browser_auth_rate_limit
 from core.tenancy import (
@@ -1152,7 +1153,11 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
         return kwargs
 
     def form_valid(self, form):
-        member = form.save()
+        try:
+            member = form.save()
+        except LastActiveOwnerError as error:
+            form.add_error('role', str(error))
+            return self.form_invalid(form)
         transaction.on_commit(lambda: invalidate_business_lead_cache(self.get_business().id))
         messages.success(self.request, 'Team member updated.')
         return redirect('web:team-list')
@@ -1167,24 +1172,25 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
 
 class TeamDeleteView(OwnerRequiredMixin, View):
     def post(self, request, pk):
-        membership = get_object_or_404(
-            Membership.objects.select_related('user'),
-            user_id=pk,
-            business=self.get_business(),
-        )
-        if membership.user == request.user:
-            messages.error(request, 'You cannot deactivate your own account.')
-        elif membership.role == User.Role.OWNER and membership.is_active and Membership.objects.filter(
-            business=self.get_business(),
-            role=User.Role.OWNER,
-            is_active=True,
-            user__is_active=True,
-        ).count() == 1:
-            messages.error(request, 'A business must keep at least one active owner.')
-        else:
-            membership.is_active = False
-            membership.save(update_fields=('is_active',))
-            messages.success(request, 'Team member deactivated. Their lead history is still intact.')
+        with transaction.atomic():
+            membership = get_object_or_404(
+                Membership.objects.select_related('user'),
+                user_id=pk,
+                business=self.get_business(),
+            )
+            if membership.user == request.user:
+                messages.error(request, 'You cannot deactivate your own account.')
+            else:
+                try:
+                    update_membership(
+                        membership_id=membership.id,
+                        business=self.get_business(),
+                        is_active=False,
+                    )
+                except LastActiveOwnerError as error:
+                    messages.error(request, str(error))
+                else:
+                    messages.success(request, 'Team member deactivated. Their lead history is still intact.')
         return redirect('web:team-list')
 
 

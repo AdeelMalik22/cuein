@@ -15,6 +15,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .email_verification import EmailVerificationCooldownError, send_email_verification
+from .membership_services import LastActiveOwnerError, remove_membership
 from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
 from .password_reset import PasswordResetCooldownError, send_password_reset_code
 
@@ -223,6 +224,44 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         new_user = User.objects.get(username='salesperson')
         self.assertEqual(new_user.business, self.business)
+
+    def test_owner_cannot_demote_the_last_active_owner(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.patch(
+            reverse('user-detail', args=[self.owner.id]),
+            {'role': User.Role.MANAGER},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('role', response.data)
+        membership = Membership.objects.get(user=self.owner, business=self.business)
+        self.assertEqual(membership.role, User.Role.OWNER)
+
+    def test_owner_can_remove_a_second_owner_and_the_service_preserves_the_last_one(self):
+        second_owner = User.objects.create_user(
+            username='second-owner',
+            password='test-password',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        Membership.objects.create(
+            user=second_owner,
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        self.client.force_authenticate(self.owner)
+
+        removed = self.client.delete(reverse('user-detail', args=[second_owner.id]))
+
+        self.assertEqual(removed.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Membership.objects.filter(user=second_owner, business=self.business).exists())
+        owner_membership = Membership.objects.get(user=self.owner, business=self.business)
+        with self.assertRaises(LastActiveOwnerError):
+            with transaction.atomic():
+                remove_membership(membership_id=owner_membership.id, business=self.business)
+        self.assertTrue(Membership.objects.filter(pk=owner_membership.id).exists())
 
     def test_user_identity_is_unique_case_insensitively(self):
         User.objects.create_user(

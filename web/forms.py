@@ -9,6 +9,7 @@ from django.utils.text import slugify
 from zoneinfo import available_timezones
 
 from core.captcha import captcha_enabled, verify_turnstile
+from core.membership_services import update_membership
 from core.models import Business, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
@@ -429,14 +430,22 @@ class TeamUserForm(forms.ModelForm):
                     # again, while deactivation stays scoped to this workspace.
                     user.is_active = True
                 user.save()
-                Membership.objects.update_or_create(
-                    user=user,
-                    business=self.business,
-                    defaults={
-                        'role': self.cleaned_data['role'],
-                        'is_active': self.cleaned_data.get('is_active', False),
-                    },
-                )
+                if user.pk and self.membership:
+                    update_membership(
+                        membership_id=self.membership.id,
+                        business=self.business,
+                        role=self.cleaned_data['role'],
+                        is_active=self.cleaned_data.get('is_active', False),
+                    )
+                else:
+                    Membership.objects.update_or_create(
+                        user=user,
+                        business=self.business,
+                        defaults={
+                            'role': self.cleaned_data['role'],
+                            'is_active': self.cleaned_data.get('is_active', False),
+                        },
+                    )
         return user
 
 
