@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -68,6 +69,22 @@ class LeadApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_product_name_is_unique_case_insensitively_per_business(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Product.objects.create(business=self.business, name='SOLAR INSTALLATION')
+
+    def test_product_api_rejects_a_case_insensitive_duplicate_name(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.post(
+            reverse('product-list'),
+            {'name': 'SOLAR INSTALLATION'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('name', response.data)
 
     def test_lost_transition_requires_reason(self):
         self.client.force_authenticate(self.salesperson)

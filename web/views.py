@@ -1155,11 +1155,11 @@ class ProductListView(OwnerRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         context.update(self.common_context())
         context['products'] = Product.objects.for_business(self.get_business()).order_by('-is_active', 'name')
-        context['form'] = ProductForm()
+        context['form'] = ProductForm(business=self.get_business())
         return context
 
     def post(self, request, *args, **kwargs):
-        form = ProductForm(request.POST)
+        form = ProductForm(request.POST, business=self.get_business())
         if form.is_valid():
             product = form.save(commit=False)
             product.business = self.get_business()
@@ -1229,6 +1229,11 @@ class ProductEditView(OwnerRequiredMixin, UpdateView):
 
     def get_queryset(self):
         return Product.objects.for_business(self.get_business())
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['business'] = self.get_business()
+        return kwargs
 
     def form_valid(self, form):
         product = form.save()

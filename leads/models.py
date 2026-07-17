@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 from core.models import TenantScopedModel, User
@@ -17,7 +18,11 @@ class Product(TenantScopedModel):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=('business', 'name'), name='unique_product_name_per_business'),
+            models.UniqueConstraint(
+                Lower('name'),
+                'business',
+                name='unique_product_name_per_business',
+            ),
         ]
         indexes = [
             models.Index(fields=('business', 'is_active')),

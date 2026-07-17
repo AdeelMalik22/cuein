@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core import mail
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -222,6 +223,51 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         new_user = User.objects.get(username='salesperson')
         self.assertEqual(new_user.business, self.business)
+
+    def test_user_identity_is_unique_case_insensitively(self):
+        User.objects.create_user(
+            username='Email-Owner',
+            email='owner@example.com',
+            password='test-password',
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            User.objects.create_user(
+                username='email-owner',
+                email='different@example.com',
+                password='test-password',
+            )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            User.objects.create_user(
+                username='duplicate-email-owner',
+                email='OWNER@example.com',
+                password='test-password',
+            )
+
+    def test_pending_registration_identity_is_unique_case_insensitively(self):
+        PendingRegistration.objects.create(
+            business_name='Pending Solar',
+            username='Pending-Owner',
+            email='pending@example.com',
+            password=make_password('test-password'),
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PendingRegistration.objects.create(
+                business_name='Another Pending Solar',
+                username='pending-owner',
+                email='different@example.com',
+                password=make_password('test-password'),
+            )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PendingRegistration.objects.create(
+                business_name='Another Pending Solar',
+                username='different-pending-owner',
+                email='PENDING@example.com',
+                password=make_password('test-password'),
+            )
 
 
 @override_settings(

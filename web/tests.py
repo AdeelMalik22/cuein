@@ -191,7 +191,7 @@ class ProfileAndAvatarTests(TestCase):
                 'first_name': self.owner.first_name,
                 'last_name': self.owner.last_name,
                 'email': self.owner.email,
-                'username': self.teammate.username,
+                'username': self.teammate.username.upper(),
                 'phone': '',
             },
         )
@@ -200,6 +200,18 @@ class ProfileAndAvatarTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.owner.username, 'owner')
         self.assertContains(response, 'This username is already in use.')
+
+    def test_product_form_rejects_a_case_insensitive_duplicate_name(self):
+        Product.objects.create(business=self.business, name='Solar installation')
+
+        response = self.client.post(
+            reverse('web:product-list'),
+            {'name': 'SOLAR INSTALLATION', 'description': '', 'is_active': 'on'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'A product with this name already exists in this business.')
+        self.assertEqual(Product.objects.for_business(self.business).count(), 1)
 
     def test_assignee_picker_shows_profile_photos_and_the_fallback_avatar(self):
         response = self.client.get(reverse('web:lead-create'))

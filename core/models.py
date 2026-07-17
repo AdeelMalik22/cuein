@@ -2,6 +2,8 @@ import uuid
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 from .validators import validate_iana_timezone
 
@@ -123,6 +125,19 @@ class User(AbstractUser):
     email_verified_at = models.DateTimeField(null=True, blank=True)
     email_verification_sent_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta(AbstractUser.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                Lower('username'),
+                name='unique_user_username_case_insensitive',
+            ),
+            models.UniqueConstraint(
+                Lower('email'),
+                condition=~Q(email=''),
+                name='unique_user_email_case_insensitive',
+            ),
+        ]
+
     def __str__(self):
         return self.get_username()
 
@@ -176,6 +191,16 @@ class PendingRegistration(models.Model):
     class Meta:
         verbose_name = 'pending registration'
         verbose_name_plural = 'pending registrations'
+        constraints = [
+            models.UniqueConstraint(
+                Lower('username'),
+                name='unique_pending_registration_username_case_insensitive',
+            ),
+            models.UniqueConstraint(
+                Lower('email'),
+                name='unique_pending_registration_email_case_insensitive',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.business_name} ({self.email})'

@@ -84,6 +84,26 @@ class TeamUserSerializer(serializers.ModelSerializer):
         validate_password(value)
         return value
 
+    def validate_username(self, value):
+        username = value.strip()
+        existing_users = User.objects.exclude(pk=getattr(self.instance, 'pk', None))
+        if existing_users.filter(username__iexact=username).exists() or PendingRegistration.objects.filter(
+            username__iexact=username,
+        ).exists():
+            raise serializers.ValidationError('This username is already in use.')
+        return username
+
+    def validate_email(self, value):
+        email = value.strip().lower()
+        if not email:
+            return email
+        existing_users = User.objects.exclude(pk=getattr(self.instance, 'pk', None))
+        if existing_users.filter(email__iexact=email).exists() or PendingRegistration.objects.filter(
+            email__iexact=email,
+        ).exists():
+            raise serializers.ValidationError('An account already uses this email.')
+        return email
+
     def validate(self, attrs):
         if not self.instance and not attrs.get('password'):
             raise serializers.ValidationError({'password': 'This field is required when creating a user.'})
@@ -189,9 +209,12 @@ class SignupSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
 
     def validate_username(self, value):
-        if User.objects.filter(username=value).exists() or PendingRegistration.objects.filter(username=value).exists():
+        username = value.strip()
+        if User.objects.filter(username__iexact=username).exists() or PendingRegistration.objects.filter(
+            username__iexact=username,
+        ).exists():
             raise serializers.ValidationError('This username is already in use.')
-        return value
+        return username
 
     def validate_password(self, value):
         validate_password(value)
