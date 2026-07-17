@@ -45,10 +45,9 @@ from core.tenancy import (
 )
 from core.timezones import business_day_bounds
 from followups.models import FollowUpTask
-from followups.rules import DELAYED_FOLLOWUP, rule_for_stage
-from followups.tasks import schedule_follow_up
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product
+from leads.services import record_lead_capture, record_needs_time, transition_lead
 
 from .forms import (
     ActivityForm,
@@ -854,18 +853,13 @@ class LeadCreateView(TenantWebMixin, FormView):
         return kwargs
 
     def form_valid(self, form):
-        lead = form.save(commit=False)
-        lead.business = self.get_business()
-        lead.assigned_user = form.cleaned_data.get('assigned_user') or self.request.user
-        lead.save()
-        Activity.objects.create(
-            business=lead.business,
-            lead=lead,
-            kind=Activity.Kind.SYSTEM,
-            content='Lead captured.',
-            created_by=self.request.user,
-        )
-        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+        with transaction.atomic():
+            lead = form.save(commit=False)
+            lead.business = self.get_business()
+            lead.assigned_user = form.cleaned_data.get('assigned_user') or self.request.user
+            lead.save()
+            record_lead_capture(lead=lead, actor=self.request.user)
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(self.request, f'{lead.customer_name} is now in your pipeline.')
         return redirect('web:lead-detail', pk=lead.pk)
 
@@ -942,38 +936,13 @@ class LeadStageUpdateView(TenantWebMixin, View):
             if self.get_role() == User.Role.SALESPERSON and locked_lead.assigned_user_id != request.user.id:
                 return HttpResponseForbidden('You can only update your own leads.')
 
-            previous_stage = locked_lead.stage
-            locked_lead.stage = next_stage
-            locked_lead.lost_reason = form.cleaned_data.get('lost_reason', '').strip() if next_stage == Lead.Stage.LOST else ''
-            locked_lead.closed_at = timezone.now() if next_stage in (Lead.Stage.WON, Lead.Stage.LOST) else None
-            locked_lead.last_activity_at = timezone.now()
-            locked_lead.save()
-
-            if previous_stage != next_stage:
-                Activity.objects.create(
-                    business=locked_lead.business,
-                    lead=locked_lead,
-                    kind=Activity.Kind.STAGE_CHANGE,
-                    content=(
-                        f'Moved from {Lead.Stage(previous_stage).label} '
-                        f'to {Lead.Stage(next_stage).label}.'
-                    ),
-                    metadata={'from': previous_stage, 'to': next_stage},
-                    created_by=request.user,
-                )
-            if note:
-                Activity.objects.create(
-                    business=locked_lead.business,
-                    lead=locked_lead,
-                    kind=Activity.Kind.NOTE,
-                    content=note,
-                    created_by=request.user,
-                )
-            rule = rule_for_stage(next_stage) if previous_stage != next_stage else None
-            if rule:
-                transaction.on_commit(
-                    lambda: schedule_follow_up.delay(str(locked_lead.business_id), str(locked_lead.id), rule.key),
-                )
+            transition_lead(
+                lead=locked_lead,
+                stage=next_stage,
+                lost_reason=form.cleaned_data.get('lost_reason', ''),
+                note=note,
+                actor=request.user,
+            )
             transaction.on_commit(lambda: invalidate_business_lead_cache(locked_lead.business_id))
 
         if wants_json:
@@ -989,22 +958,12 @@ class LeadStageUpdateView(TenantWebMixin, View):
 class LeadNeedsTimeView(TenantWebMixin, View):
     def post(self, request, pk):
         lead = self.get_visible_lead(pk)
-        if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
-            messages.error(request, 'Closed leads cannot receive another follow-up reminder.')
-            return redirect('web:lead-detail', pk=lead.pk)
         with transaction.atomic():
-            lead.last_activity_at = timezone.now()
-            lead.save(update_fields=('last_activity_at', 'updated_at'))
-            Activity.objects.create(
-                business=lead.business,
-                lead=lead,
-                kind=Activity.Kind.NOTE,
-                content='Customer needs more time. A follow-up has been set for seven days from now.',
-                created_by=request.user,
-            )
-            transaction.on_commit(
-                lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), DELAYED_FOLLOWUP.key),
-            )
+            lead = Lead.objects.for_business(self.get_business()).select_for_update().get(pk=lead.pk)
+            if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
+                messages.error(request, 'Closed leads cannot receive another follow-up reminder.')
+                return redirect('web:lead-detail', pk=lead.pk)
+            record_needs_time(lead=lead, actor=request.user)
             transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(request, 'Follow-up set for seven days from now.')
         return redirect('web:lead-detail', pk=lead.pk)

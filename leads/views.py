@@ -1,6 +1,5 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -27,9 +26,7 @@ from .serializers import (
     LeadTransitionSerializer,
     ProductSerializer,
 )
-from followups.rules import rule_for_stage
-from followups.rules import DELAYED_FOLLOWUP
-from followups.tasks import schedule_follow_up
+from .services import record_lead_capture, record_needs_time, transition_lead
 
 
 class LeadPageNumberPagination(PageNumberPagination):
@@ -113,8 +110,10 @@ class LeadViewSet(viewsets.ModelViewSet):
         assigned_user = serializer.validated_data.get('assigned_user', self.request.user)
         if active_role(self.request) == User.Role.SALESPERSON:
             assigned_user = self.request.user
-        lead = serializer.save(business=active_business(self.request), assigned_user=assigned_user)
-        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+        with transaction.atomic():
+            lead = serializer.save(business=active_business(self.request), assigned_user=assigned_user)
+            record_lead_capture(lead=lead, actor=self.request.user)
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
 
     def perform_update(self, serializer):
         if active_role(self.request) == User.Role.SALESPERSON and 'assigned_user' in self.request.data:
@@ -179,29 +178,27 @@ class LeadViewSet(viewsets.ModelViewSet):
             serializer = LeadTransitionSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
-            lead.stage = serializer.validated_data['stage']
-            lead.lost_reason = serializer.validated_data.get('lost_reason', '')
-            lead.closed_at = timezone.now() if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST) else None
-            lead.last_activity_at = timezone.now()
-            lead.full_clean()
-            lead.save()
-            rule = rule_for_stage(lead.stage)
-            if rule:
-                transaction.on_commit(
-                    lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), rule.key)
-                )
+            lead, _stage_changed = transition_lead(
+                lead=lead,
+                stage=serializer.validated_data['stage'],
+                lost_reason=serializer.validated_data.get('lost_reason', ''),
+                actor=request.user,
+            )
             transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
 
         return Response(LeadSerializer(lead, context={'request': request}).data)
 
     @action(detail=True, methods=('post',), url_path='needs-time')
     def needs_time(self, request, pk=None):
-        lead = self.get_object()
-        if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
-            raise ValidationError({'detail': 'Terminal leads cannot receive a follow-up reminder.'})
-        transaction.on_commit(
-            lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), DELAYED_FOLLOWUP.key)
-        )
+        with transaction.atomic():
+            locked_queryset = Lead.objects.for_business(active_business(request))
+            if active_role(request) == User.Role.SALESPERSON:
+                locked_queryset = locked_queryset.filter(assigned_user=request.user)
+            lead = get_object_or_404(locked_queryset.select_for_update(), pk=pk)
+            if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
+                raise ValidationError({'detail': 'Terminal leads cannot receive a follow-up reminder.'})
+            record_needs_time(lead=lead, actor=request.user)
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         return Response(status=status.HTTP_202_ACCEPTED)
 
 # Create your views here.

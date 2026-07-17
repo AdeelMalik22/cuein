@@ -16,7 +16,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.models import Business, PasswordResetRequest, PendingRegistration, User
 from followups.models import FollowUpTask
-from leads.models import Lead, Product
+from leads.models import Activity, Lead, Product
 from web.views import DashboardView
 
 
@@ -776,6 +776,43 @@ class LeadBoardPaginationTests(TestCase):
         self.assertContains(page_two, 'Page 2 of 2')
         self.assertEqual(filtered.context['page_obj'].paginator.count, 1)
         self.assertContains(filtered, 'Specific matching lead')
+
+
+class LeadWorkflowWebTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='owner', password='test-password', business=self.business, role=User.Role.OWNER,
+        )
+        self.lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Ayesha',
+            phone='03000000000',
+            assigned_user=self.owner,
+        )
+        self.client.force_login(self.owner)
+
+    @patch('leads.services.schedule_follow_up.delay')
+    def test_stage_update_records_the_same_timeline_event_as_the_api(self, schedule_follow_up):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse('web:lead-stage', args=[self.lead.id]),
+                {'stage': Lead.Stage.QUOTATION_SENT, 'lost_reason': '', 'note': ''},
+            )
+
+        self.assertRedirects(
+            response,
+            reverse('web:lead-detail', args=[self.lead.id]),
+            fetch_redirect_response=False,
+        )
+        activity = Activity.objects.get(lead=self.lead, kind=Activity.Kind.STAGE_CHANGE)
+        self.assertEqual(activity.metadata, {
+            'from': Lead.Stage.NEW_INQUIRY,
+            'to': Lead.Stage.QUOTATION_SENT,
+        })
+        schedule_follow_up.assert_called_once_with(
+            str(self.business.id), str(self.lead.id), 'quote_followup_v1',
+        )
 
 
 class TaskListPaginationTests(TestCase):
