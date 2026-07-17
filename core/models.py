@@ -3,6 +3,8 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from .validators import validate_iana_timezone
+
 
 class Business(models.Model):
     """A customer company: the tenant boundary for its data."""
@@ -52,7 +54,11 @@ class Business(models.Model):
         choices=Industry.choices,
         default=Industry.OTHER,
     )
-    timezone = models.CharField(max_length=64, default='Asia/Karachi')
+    timezone = models.CharField(
+        max_length=64,
+        default='Asia/Karachi',
+        validators=[validate_iana_timezone],
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -151,7 +157,11 @@ class PendingRegistration(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     business_name = models.CharField(max_length=255)
     industry = models.CharField(max_length=32, choices=Business.Industry.choices, default=Business.Industry.OTHER)
-    timezone = models.CharField(max_length=64, default='Asia/Karachi')
+    timezone = models.CharField(
+        max_length=64,
+        default='Asia/Karachi',
+        validators=[validate_iana_timezone],
+    )
     username = models.CharField(max_length=150, unique=True)
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)

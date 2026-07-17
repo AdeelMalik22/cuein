@@ -107,6 +107,22 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertIn('six-digit code', mail.outbox[0].body)
         self.assertNotIn('/verify-email/', mail.outbox[0].body)
 
+    def test_signup_rejects_an_invalid_timezone(self):
+        response = self.client.post(
+            reverse('signup'),
+            {
+                'business_name': 'Skyline AC',
+                'username': 'skyline-owner',
+                'password': 'Strong-test-password-123',
+                'email': 'owner@skyline.example',
+                'timezone': 'Not/A-Timezone',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('timezone', response.data)
+
     def test_verification_code_creates_the_owner_and_returns_tokens(self):
         PendingRegistration.objects.create(
             business_name='Verified AC',
@@ -145,6 +161,18 @@ class BusinessAndTeamApiTests(APITestCase):
         self.other_business.refresh_from_db()
         self.assertEqual(self.business.name, 'North Star Energy')
         self.assertEqual(self.other_business.name, 'Bright CCTV')
+
+    def test_owner_cannot_set_an_invalid_business_timezone(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.patch(
+            reverse('current_business'),
+            {'timezone': 'Not/A-Timezone'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('timezone', response.data)
 
     def test_owner_cannot_retrieve_a_user_from_another_business(self):
         self.client.force_authenticate(self.owner)

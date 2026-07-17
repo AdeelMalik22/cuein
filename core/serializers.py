@@ -1,10 +1,12 @@
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from .authentication import revoke_refresh_tokens_for_user
 from .models import Business, Membership, PendingRegistration, User
 from .tenancy import active_business, default_active_membership_for, request_membership
+from .validators import validate_iana_timezone
 
 
 class BusinessSerializer(serializers.ModelSerializer):
@@ -179,6 +181,14 @@ class SignupSerializer(serializers.Serializer):
 
     def validate_password(self, value):
         validate_password(value)
+        return value
+
+    def validate_timezone(self, value):
+        value = value.strip()
+        try:
+            validate_iana_timezone(value)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.messages) from error
         return value
 
     def validate_email(self, value):
