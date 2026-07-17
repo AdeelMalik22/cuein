@@ -43,6 +43,7 @@ from core.tenancy import (
     resolve_web_membership,
     users_for_business,
 )
+from core.timezones import business_day_bounds
 from followups.models import FollowUpTask
 from followups.rules import DELAYED_FOLLOWUP, rule_for_stage
 from followups.tasks import schedule_follow_up
@@ -456,6 +457,7 @@ class DashboardView(TenantWebMixin, TemplateView):
         business_timezone = ZoneInfo(business.timezone)
         dashboard_now = timezone.localtime(now, timezone=business_timezone)
         today = dashboard_now.date()
+        today_start, tomorrow_start = business_day_bounds(business.timezone, now=now)
         dashboard_greeting = self.greeting_for_hour(dashboard_now.hour)
         leads = self.visible_leads()
         active_leads = leads.exclude(stage__in=(Lead.Stage.WON, Lead.Stage.LOST))
@@ -586,7 +588,11 @@ class DashboardView(TenantWebMixin, TemplateView):
         for teammate in users_for_business(business).order_by('first_name', 'username'):
             member_leads = active_leads.filter(assigned_user=teammate)
             member_stalled = member_leads.filter(last_activity_at__lt=stale_cutoff).count()
-            member_due = open_tasks.filter(assigned_user=teammate, due_at__date=today).count()
+            member_due = open_tasks.filter(
+                assigned_user=teammate,
+                due_at__gte=today_start,
+                due_at__lt=tomorrow_start,
+            ).count()
             team_attention.append({
                 'member': teammate,
                 'active_count': member_leads.count(),
@@ -610,7 +616,10 @@ class DashboardView(TenantWebMixin, TemplateView):
             'today': today,
             'dashboard_now': dashboard_now,
             'dashboard_greeting': dashboard_greeting,
-            'due_today_count': open_tasks.filter(due_at__date=today).count(),
+            'due_today_count': open_tasks.filter(
+                due_at__gte=today_start,
+                due_at__lt=tomorrow_start,
+            ).count(),
             'overdue_count': overdue_tasks.count(),
             'active_leads_count': active_count,
             'pipeline_value': active_leads.aggregate(total=Sum('quoted_price'))['total'] or 0,

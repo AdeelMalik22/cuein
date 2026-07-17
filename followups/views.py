@@ -1,7 +1,6 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from zoneinfo import ZoneInfo
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -11,6 +10,7 @@ from rest_framework.response import Response
 from core.models import User
 from core.permissions import IsBusinessManagerOrOwner
 from core.tenancy import active_business, active_role
+from core.timezones import business_day_bounds
 
 from .models import FollowUpTask, Notification
 from .serializers import (
@@ -37,8 +37,11 @@ class FollowUpTaskViewSet(viewsets.ModelViewSet):
         if status_value:
             queryset = queryset.filter(status=status_value)
         if self.request.query_params.get('due') == 'today':
-            local_today = timezone.localdate(timezone=ZoneInfo(business.timezone))
-            queryset = queryset.filter(due_at__date=local_today)
+            today_start, tomorrow_start = business_day_bounds(
+                business.timezone,
+                now=timezone.now(),
+            )
+            queryset = queryset.filter(due_at__gte=today_start, due_at__lt=tomorrow_start)
         return queryset
 
     def perform_create(self, serializer):

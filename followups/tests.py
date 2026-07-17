@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
+from unittest.mock import patch
 
 from django.urls import reverse
 from django.utils import timezone
@@ -37,6 +38,35 @@ class FollowUpApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 1)
         self.assertEqual(response.data['results'][0]['id'], str(salesperson_task.id))
+
+    def test_today_filter_uses_the_business_local_day(self):
+        self.business.timezone = 'Asia/Karachi'
+        self.business.save(update_fields=('timezone',))
+        due_during_local_today = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=datetime(2026, 1, 1, 20, 0, tzinfo=datetime_timezone.utc),
+            description='Local-day task',
+        )
+        FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=datetime(2026, 1, 2, 20, 0, tzinfo=datetime_timezone.utc),
+            description='Tomorrow local',
+        )
+        self.client.force_authenticate(self.owner)
+
+        with patch(
+            'followups.views.timezone.now',
+            return_value=datetime(2026, 1, 2, 0, 30, tzinfo=datetime_timezone.utc),
+        ):
+            response = self.client.get(f'{reverse("follow-up-task-list")}?due=today')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], str(due_during_local_today.id))
 
     def test_completion_creates_a_next_action(self):
         task = FollowUpTask.objects.create(business=self.business, lead=self.lead, assigned_user=self.salesperson, due_at=timezone.now() + timedelta(days=1), description='Call Ali')
