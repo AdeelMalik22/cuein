@@ -4,13 +4,13 @@
 {% block content %}
   <section class="page-heading notification-page-heading">
     <div><p class="eyebrow">ATTENTION QUEUE</p><h1>Notifications</h1><p>Overdue follow-ups are collected here until you have seen them or moved the task forward.</p></div>
-    <div class="task-overview" aria-label="Unread notifications"><span>Unread</span><strong>{{ unread_notification_count }}</strong><em>{% if unread_notification_count %}Needs a look{% else %}All caught up{% endif %}</em></div>
+    <div class="notification-overview" aria-label="Unread notifications"><span>Unread</span><strong>{{ unread_notification_count }}</strong><em>{% if unread_notification_count %}Needs a look{% else %}All caught up{% endif %}</em></div>
   </section>
   <section class="notification-workspace panel">
     <header class="notification-toolbar">
-      <nav class="task-filter-tabs" aria-label="Filter notifications">
-        <a class="task-filter-tab {% if not selected_status %}is-active{% endif %}" href="{% url 'web:notification-list' %}"><span>All</span></a>
-        <a class="task-filter-tab {% if selected_status == 'unread' %}is-active{% endif %}" href="?status=unread"><span>Unread</span><b>{{ unread_notification_count }}</b></a>
+      <nav class="notification-filter-tabs" aria-label="Filter notifications">
+        <a class="notification-filter-tab {% if not selected_status %}is-active{% endif %}" href="{% url 'web:notification-list' %}"><span>All</span></a>
+        <a class="notification-filter-tab {% if selected_status == 'unread' %}is-active{% endif %}" href="?status=unread"><span>Unread</span><b>{{ unread_notification_count }}</b></a>
       </nav>
       {% if page_obj.paginator.count %}<p class="task-list-range">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }}</p>{% endif %}
     </header>

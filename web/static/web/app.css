@@ -2271,6 +2271,41 @@ input::placeholder, textarea::placeholder {
     padding: 0;
 }
 
+body.notification-page .notification-overview {
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: .8rem;
+    display: grid;
+    flex: 0 0 auto;
+    gap: .04rem;
+    grid-template-columns: auto auto;
+    min-width: 148px;
+    padding: .62rem .8rem;
+}
+
+body.notification-page .notification-overview > span {
+    color: var(--muted);
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+}
+
+body.notification-page .notification-overview strong {
+    font-size: 1.52rem;
+    letter-spacing: -.06em;
+    line-height: 1;
+}
+
+body.notification-page .notification-overview em {
+    color: var(--accent);
+    font-size: .63rem;
+    font-style: normal;
+    font-weight: 700;
+    grid-column: 1 / -1;
+}
+
 .notification-toolbar {
     align-items: center;
     border-bottom: 1px solid var(--line);
@@ -2278,6 +2313,59 @@ input::placeholder, textarea::placeholder {
     gap: 1rem;
     justify-content: space-between;
     padding: .9rem 1.1rem;
+}
+
+body.notification-page .notification-filter-tabs {
+    align-items: center;
+    background: #efefed;
+    border: 1px solid #e3e3e0;
+    border-radius: .7rem;
+    display: inline-flex;
+    gap: .22rem;
+    padding: .22rem;
+}
+
+body.notification-page .notification-filter-tab {
+    align-items: center;
+    border-radius: .5rem;
+    color: var(--muted);
+    display: inline-flex;
+    font-size: .7rem;
+    font-weight: 700;
+    gap: .42rem;
+    min-height: 30px;
+    padding: .38rem .55rem;
+    transition: background .16s ease, box-shadow .16s ease, color .16s ease;
+    white-space: nowrap;
+}
+
+body.notification-page .notification-filter-tab b {
+    align-items: center;
+    background: #ddddda;
+    border-radius: 99px;
+    color: #5c5c58;
+    display: inline-flex;
+    font-size: .59rem;
+    height: 17px;
+    justify-content: center;
+    min-width: 17px;
+    padding: 0 .28rem;
+}
+
+body.notification-page .notification-filter-tab:hover {
+    background: rgba(255, 255, 255, .72);
+    color: var(--ink);
+}
+
+body.notification-page .notification-filter-tab.is-active {
+    background: var(--ink);
+    box-shadow: 0 1px 2px rgba(17, 17, 17, .16);
+    color: var(--paper);
+}
+
+body.notification-page .notification-filter-tab.is-active b {
+    background: rgba(255, 255, 255, .18);
+    color: var(--paper);
 }
 
 .notification-list {
@@ -2356,6 +2444,22 @@ input::placeholder, textarea::placeholder {
 
     .notification-toolbar {
         flex-direction: column;
+    }
+
+    body.notification-page .notification-overview {
+        min-width: 0;
+        width: 100%;
+    }
+
+    body.notification-page .notification-filter-tabs {
+        max-width: 100%;
+        overflow-x: auto;
+        width: 100%;
+    }
+
+    body.notification-page .notification-filter-tab {
+        flex: 1 0 auto;
+        justify-content: center;
     }
 
     .notification-row {
