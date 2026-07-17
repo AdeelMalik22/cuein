@@ -184,16 +184,28 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STORAGES = {
-    'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
-    },
-}
 
 # User-uploaded profile pictures. In production these files should be served
 # by the deployment's media storage; Django serves them locally in DEBUG mode.
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Defining STORAGES replaces Django's complete storage registry. Keep an
+# explicit default backend for uploaded profile pictures alongside WhiteNoise
+# for static assets, otherwise accessing ``profile_picture.url`` raises an
+# InvalidStorageError at render time.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+        'OPTIONS': {
+            'location': MEDIA_ROOT,
+            'base_url': MEDIA_URL,
+        },
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 LOGIN_URL = 'web:login'
 LOGIN_REDIRECT_URL = 'web:dashboard'
