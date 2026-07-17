@@ -178,6 +178,25 @@ For an account with more than one workspace, obtain a token for a specific busin
 
    Celery uses `redis://127.0.0.1:6379/0` by default. Override `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` in `.env` when Redis runs elsewhere.
 
+## Production server
+
+Do not use `manage.py runserver` in production. After installing the pinned
+dependencies, running migrations, and collecting static files, run Django with
+Gunicorn behind a TLS-terminating reverse proxy or load balancer:
+
+```bash
+python3.10 manage.py migrate --noinput
+python3.10 manage.py collectstatic --noinput
+python3.10 -m gunicorn --bind 127.0.0.1:8000 --workers 3 \
+  --access-logfile - --error-logfile - cuein.wsgi:application
+```
+
+Keep Gunicorn bound to loopback unless the host's network policy and a trusted
+TLS proxy protect it. Configure the proxy to use `GET /healthz/` for liveness
+and `GET /readyz/` for dependency readiness. WhiteNoise serves collected static
+assets; serve uploaded `MEDIA_ROOT` files through the proxy or object storage in
+production, because Django only serves media files directly while `DEBUG=true`.
+
 ## Important development rule
 
 Never hand-write a Django migration. After model changes, generate it with:
