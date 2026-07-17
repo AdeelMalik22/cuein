@@ -1,6 +1,8 @@
+from uuid import UUID
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-from rest_framework import filters, status, viewsets
+from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import LimitOffsetPagination, PageNumberPagination
@@ -18,8 +20,9 @@ from .cache import (
     invalidate_business_lead_cache,
     lead_api_cache_key,
 )
-from .models import Lead, Product
+from .models import Activity, Lead, Product
 from .serializers import (
+    ActivitySerializer,
     LeadAssignmentSerializer,
     LeadKanbanCardSerializer,
     LeadSerializer,
@@ -68,6 +71,39 @@ class ProductViewSet(viewsets.ModelViewSet):
         business_id = instance.business_id
         instance.delete()
         transaction.on_commit(lambda: invalidate_business_lead_cache(business_id))
+
+
+class ActivityViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    viewsets.GenericViewSet,
+):
+    serializer_class = ActivitySerializer
+    permission_classes = (IsAuthenticated,)
+    filter_backends = (filters.OrderingFilter,)
+    ordering_fields = ('created_at', 'kind')
+    ordering = ('-created_at',)
+
+    def get_queryset(self):
+        queryset = Activity.objects.for_business(active_business(self.request)).select_related(
+            'lead', 'created_by',
+        )
+        if active_role(self.request) == User.Role.SALESPERSON:
+            queryset = queryset.filter(lead__assigned_user=self.request.user)
+
+        lead_id = self.request.query_params.get('lead')
+        if lead_id:
+            try:
+                queryset = queryset.filter(lead_id=UUID(lead_id))
+            except (TypeError, ValueError, AttributeError):
+                return queryset.none()
+        return queryset
+
+    def perform_create(self, serializer):
+        with transaction.atomic():
+            activity = serializer.save()
+            transaction.on_commit(lambda: invalidate_business_lead_cache(activity.business_id))
 
 
 class LeadViewSet(viewsets.ModelViewSet):

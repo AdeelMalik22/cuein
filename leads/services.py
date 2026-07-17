@@ -29,6 +29,20 @@ def record_lead_capture(*, lead, actor):
     )
 
 
+def record_manual_activity(*, lead, actor, kind, content):
+    """Add a user-entered timeline item and refresh the lead's activity time."""
+    activity = Activity.objects.create(
+        business=lead.business,
+        lead=lead,
+        kind=kind,
+        content=content,
+        created_by=actor,
+    )
+    lead.last_activity_at = timezone.now()
+    lead.save(update_fields=('last_activity_at', 'updated_at'))
+    return activity
+
+
 def _schedule_rule_after_commit(lead, rule_key):
     transaction.on_commit(
         lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), rule_key),

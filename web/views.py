@@ -47,7 +47,7 @@ from core.timezones import business_day_bounds
 from followups.models import FollowUpTask
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product
-from leads.services import record_lead_capture, record_needs_time, transition_lead
+from leads.services import record_lead_capture, record_manual_activity, record_needs_time, transition_lead
 
 from .forms import (
     ActivityForm,
@@ -974,14 +974,14 @@ class LeadActivityCreateView(TenantWebMixin, View):
         lead = self.get_visible_lead(pk)
         form = ActivityForm(request.POST)
         if form.is_valid():
-            activity = form.save(commit=False)
-            activity.business = lead.business
-            activity.lead = lead
-            activity.created_by = request.user
-            activity.save()
-            lead.last_activity_at = timezone.now()
-            lead.save(update_fields=('last_activity_at', 'updated_at'))
-            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+            with transaction.atomic():
+                record_manual_activity(
+                    lead=lead,
+                    actor=request.user,
+                    kind=form.cleaned_data['kind'],
+                    content=form.cleaned_data['content'],
+                )
+                transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
             messages.success(request, 'Activity added to the timeline.')
         else:
             messages.error(request, 'Add a short note about what happened before saving.')

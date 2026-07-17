@@ -104,6 +104,88 @@ class LeadApiTests(APITestCase):
             created_by=self.owner,
         ).exists())
 
+    def test_activity_api_creates_a_manual_event_and_updates_the_lead(self):
+        self.client.force_authenticate(self.salesperson)
+        previous_activity_at = self.lead.last_activity_at
+
+        response = self.client.post(
+            reverse('activity-list'),
+            {
+                'lead': str(self.lead.id),
+                'kind': Activity.Kind.CALL,
+                'content': 'Called to confirm the site visit.',
+                'metadata': {'spoofed': 'value'},
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertNotIn('spoofed', response.data['metadata'])
+        self.assertEqual(response.data['created_by'], str(self.salesperson.id))
+        activity = Activity.objects.get(pk=response.data['id'])
+        self.assertEqual(activity.kind, Activity.Kind.CALL)
+        self.assertEqual(activity.created_by, self.salesperson)
+        self.assertEqual(activity.metadata, {})
+        self.lead.refresh_from_db()
+        self.assertGreater(self.lead.last_activity_at, previous_activity_at)
+
+    def test_activity_api_scopes_timeline_to_the_visible_leads(self):
+        own_activity = Activity.objects.create(
+            business=self.business,
+            lead=self.lead,
+            kind=Activity.Kind.NOTE,
+            content='Own timeline item.',
+            created_by=self.salesperson,
+        )
+        other_activity = Activity.objects.create(
+            business=self.other_business,
+            lead=self.other_lead,
+            kind=Activity.Kind.NOTE,
+            content='Private timeline item.',
+            created_by=self.other_user,
+        )
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.get(reverse('activity-list'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], str(own_activity.id))
+        detail = self.client.get(reverse('activity-detail', args=[other_activity.id]))
+        self.assertEqual(detail.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_activity_api_rejects_system_events(self):
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.post(
+            reverse('activity-list'),
+            {
+                'lead': str(self.lead.id),
+                'kind': Activity.Kind.SYSTEM,
+                'content': 'Pretend system event.',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('kind', response.data)
+
+    def test_activity_api_rejects_another_business_lead(self):
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.post(
+            reverse('activity-list'),
+            {
+                'lead': str(self.other_lead.id),
+                'kind': Activity.Kind.NOTE,
+                'content': 'Attempt to write outside the workspace.',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('lead', response.data)
+
     @patch('leads.services.schedule_follow_up.delay')
     def test_transition_records_activity_and_schedules_once(self, schedule_follow_up):
         self.client.force_authenticate(self.salesperson)
