@@ -67,11 +67,6 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
-ALLOWED_HOSTS = [
-    "184.73.123.169",
-    "ec2-18-212-153-6.compute-1.amazonaws.com",
-    "127.0.0.1"
-]
 SECURE_SSL_REDIRECT = IS_PRODUCTION
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
@@ -188,7 +183,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-STATICFILES_DIRS = [BASE_DIR / 'web' / 'static']
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 # User-uploaded profile pictures. In production these files should be served
 # by the deployment's media storage; Django serves them locally in DEBUG mode.
