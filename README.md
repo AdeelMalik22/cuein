@@ -156,6 +156,10 @@ For an account with more than one workspace, obtain a token for a specific busin
 
    The workspace is available at `http://127.0.0.1:8000/` and the API at `http://127.0.0.1:8000/api/v1/`.
 
+   Deployment probes can use `GET /healthz/` for Django process liveness and
+   `GET /readyz/` for readiness. The readiness probe returns `503` until both
+   PostgreSQL and the shared Redis/Valkey cache are reachable.
+
 5. For asynchronous follow-ups, start Redis and run a Celery worker and scheduler in separate terminals:
 
    ```bash
