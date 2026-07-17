@@ -5,7 +5,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from core.models import Business, User
+from core.models import Business, Membership, User
 from leads.models import Lead
 
 from .models import FollowUpTask, Notification
@@ -79,3 +79,24 @@ class FollowUpServiceTests(APITestCase):
         self.assertEqual(schedule_stale_escalations(), 0)
         self.assertTrue(FollowUpTask.objects.filter(lead=self.lead, rule_key=STALE_LEAD_ESCALATION.key).exists())
         self.assertFalse(FollowUpTask.objects.filter(lead=terminal, rule_key=STALE_LEAD_ESCALATION.key).exists())
+
+    def test_stale_sweep_uses_an_active_shared_membership(self):
+        other_business = Business.objects.create(name='Bright CCTV')
+        shared_manager = User.objects.create_user(
+            username='shared-manager',
+            password='test-password',
+            business=other_business,
+            role=User.Role.OWNER,
+        )
+        Membership.objects.create(
+            user=shared_manager,
+            business=self.business,
+            role=User.Role.MANAGER,
+        )
+        self.lead.last_activity_at = timezone.now() - timedelta(days=11)
+        self.lead.save(update_fields=('last_activity_at',))
+
+        self.assertEqual(schedule_stale_escalations(), 1)
+        task = FollowUpTask.objects.get(lead=self.lead, rule_key=STALE_LEAD_ESCALATION.key)
+
+        self.assertEqual(task.assigned_user, shared_manager)

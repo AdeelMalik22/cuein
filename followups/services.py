@@ -1,7 +1,8 @@
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from core.models import Business, User
+from core.models import Business, Membership, User
+from core.tenancy import ensure_legacy_memberships_for_business, is_active_member_of_business
 from leads.models import Lead
 
 from .models import FollowUpTask, Notification
@@ -14,9 +15,11 @@ def schedule_rule(*, business_id, lead_id, rule_key, recipient_id=None):
     with transaction.atomic():
         business = Business.objects.get(pk=business_id, is_active=True)
         lead = Lead.objects.for_business(business).select_related('assigned_user').get(pk=lead_id)
-        recipient = lead.assigned_user if recipient_id is None else User.objects.get(
-            pk=recipient_id, business=business, is_active=True
-        )
+        recipient = lead.assigned_user
+        if recipient_id is not None:
+            recipient = User.objects.get(pk=recipient_id, is_active=True)
+            if not is_active_member_of_business(recipient, business.id):
+                raise User.DoesNotExist
         defaults = {
             'assigned_user': recipient,
             'due_at': timezone.now() + rule.delay,
@@ -44,11 +47,18 @@ def schedule_stale_escalations():
     cutoff = timezone.now() - STALE_LEAD_ESCALATION.delay
     created_count = 0
     for business in Business.objects.filter(is_active=True):
-        recipient = User.objects.filter(
-            business=business, is_active=True, role__in=(User.Role.OWNER, User.Role.MANAGER)
-        ).order_by('role', 'id').first()
-        if not recipient:
+        # Preserve the temporary legacy-data bridge while making the actual
+        # recipient choice entirely membership-scoped.
+        ensure_legacy_memberships_for_business(business)
+        recipient_membership = Membership.objects.filter(
+            business=business,
+            is_active=True,
+            user__is_active=True,
+            role__in=(User.Role.OWNER, User.Role.MANAGER),
+        ).select_related('user').order_by('role', 'id').first()
+        if not recipient_membership:
             continue
+        recipient = recipient_membership.user
         leads = Lead.objects.for_business(business).exclude(
             stage__in=(Lead.Stage.WON, Lead.Stage.LOST)
         ).filter(last_activity_at__lt=cutoff)
