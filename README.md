@@ -197,6 +197,27 @@ and `GET /readyz/` for dependency readiness. WhiteNoise serves collected static
 assets; serve uploaded `MEDIA_ROOT` files through the proxy or object storage in
 production, because Django only serves media files directly while `DEBUG=true`.
 
+## Container stack
+
+For a repeatable single-host stack, copy `.env.example` to `.env`, set a real
+PostgreSQL password, then run:
+
+```bash
+docker compose up --build -d
+docker compose ps
+docker compose logs -f web worker beat
+```
+
+Compose starts PostgreSQL and Valkey first, runs migrations and `collectstatic`
+once, then starts Gunicorn, Celery worker, and Celery Beat. PostgreSQL and
+Valkey are intentionally private to the Compose network; only Gunicorn is
+published, and it is bound to `127.0.0.1:8000` for a host reverse proxy. This
+also means a containerized Valkey installation is checked with `docker compose
+ps`, not `systemctl status redis`.
+
+Use a production `.env` with the required `DJANGO_ENV`, secret, host, and SMTP
+settings from the local setup section before exposing the proxy publicly.
+
 ## Important development rule
 
 Never hand-write a Django migration. After model changes, generate it with:
