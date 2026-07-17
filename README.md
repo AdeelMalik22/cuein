@@ -89,7 +89,16 @@ For an account with more than one workspace, obtain a token for a specific busin
 ## Local setup
 
 1. Ensure PostgreSQL is running and create the configured database/user.
-2. Create a root `.env` file with your local connection values:
+2. Copy the safe example configuration, then replace its local PostgreSQL
+   password and any values you need:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   The included Redis URLs work with either Redis or Valkey. Valkey uses the
+   Redis protocol, so no code change is needed—point the URLs at your Valkey
+   instance instead. A minimal root `.env` contains:
 
    ```text
    POSTGRES_DB=cuein
