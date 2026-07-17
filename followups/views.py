@@ -11,6 +11,7 @@ from core.models import User
 from core.permissions import IsBusinessManagerOrOwner
 from core.tenancy import active_business, active_role
 from core.timezones import business_day_bounds
+from leads.cache import invalidate_business_lead_cache
 
 from .models import FollowUpTask, Notification
 from .serializers import (
@@ -18,6 +19,12 @@ from .serializers import (
     FollowUpTaskSerializer,
     NotificationSerializer,
     RescheduleTaskSerializer,
+)
+from .services import (
+    TaskAlreadyClosedError,
+    cancel_task,
+    complete_task,
+    reschedule_task,
 )
 
 
@@ -55,46 +62,57 @@ class FollowUpTaskViewSet(viewsets.ModelViewSet):
             raise ValidationError({'assigned_user': 'Salespeople cannot reassign tasks.'})
         serializer.save()
 
+    def _locked_task(self, pk):
+        queryset = FollowUpTask.objects.for_business(active_business(self.request))
+        if active_role(self.request) == User.Role.SALESPERSON:
+            queryset = queryset.filter(assigned_user=self.request.user)
+        return get_object_or_404(queryset.select_for_update(), pk=pk)
+
     def destroy(self, request, *args, **kwargs):
         if active_role(request) == User.Role.SALESPERSON:
             return Response({'detail': 'Only an owner or manager can cancel a task.'}, status=status.HTTP_403_FORBIDDEN)
-        task = self.get_object()
-        task.status = FollowUpTask.Status.CANCELLED
-        task.save(update_fields=('status',))
+        with transaction.atomic():
+            task = self._locked_task(kwargs['pk'])
+            try:
+                cancel_task(task=task, actor=request.user)
+            except TaskAlreadyClosedError as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=('post',))
     def complete(self, request, pk=None):
-        task = self.get_object()
         serializer = CompleteTaskSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
-            raise ValidationError({'detail': 'Only open tasks can be completed.'})
         with transaction.atomic():
-            task = FollowUpTask.objects.select_for_update().get(pk=task.pk)
-            if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
-                raise ValidationError({'detail': 'Only open tasks can be completed.'})
-            task.mark_done()
-            task.save(update_fields=('status', 'completed_at'))
-            next_task = FollowUpTask.objects.create(
-                business=task.business,
-                lead=task.lead,
-                assigned_user=task.assigned_user,
-                due_at=serializer.validated_data['next_due_at'],
-                description=serializer.validated_data['next_description'],
-            )
+            task = self._locked_task(pk)
+            try:
+                next_task = complete_task(
+                    task=task,
+                    next_due_at=serializer.validated_data['next_due_at'],
+                    next_description=serializer.validated_data['next_description'],
+                    actor=request.user,
+                )
+            except TaskAlreadyClosedError as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         return Response(FollowUpTaskSerializer(next_task, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=('post',))
     def reschedule(self, request, pk=None):
-        task = self.get_object()
         serializer = RescheduleTaskSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
-            raise ValidationError({'detail': 'Only open tasks can be rescheduled.'})
-        task.due_at = serializer.validated_data['due_at']
-        task.status = FollowUpTask.Status.PENDING
-        task.save(update_fields=('due_at', 'status'))
+        with transaction.atomic():
+            task = self._locked_task(pk)
+            try:
+                reschedule_task(
+                    task=task,
+                    due_at=serializer.validated_data['due_at'],
+                    actor=request.user,
+                )
+            except TaskAlreadyClosedError as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         return Response(FollowUpTaskSerializer(task, context={'request': request}).data)
 
 

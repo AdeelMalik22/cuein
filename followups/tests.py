@@ -7,7 +7,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.models import Business, Membership, User
-from leads.models import Lead
+from leads.models import Activity, Lead
 
 from .models import FollowUpTask, Notification
 from .rules import QUOTE_FOLLOWUP, STALE_LEAD_ESCALATION
@@ -70,6 +70,11 @@ class FollowUpApiTests(APITestCase):
 
     def test_completion_creates_a_next_action(self):
         task = FollowUpTask.objects.create(business=self.business, lead=self.lead, assigned_user=self.salesperson, due_at=timezone.now() + timedelta(days=1), description='Call Ali')
+        notification = Notification.objects.create(
+            business=self.business,
+            task=task,
+            recipient=self.salesperson,
+        )
         self.client.force_authenticate(self.salesperson)
         response = self.client.post(reverse('follow-up-task-complete', args=[task.id]), {'next_due_at': (timezone.now() + timedelta(days=3)).isoformat(), 'next_description': 'Call again'}, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -77,6 +82,100 @@ class FollowUpApiTests(APITestCase):
         self.assertEqual(task.status, FollowUpTask.Status.DONE)
         self.assertIsNotNone(task.completed_at)
         self.assertEqual(FollowUpTask.objects.filter(lead=self.lead, status=FollowUpTask.Status.PENDING).count(), 1)
+        notification.refresh_from_db()
+        self.assertIsNotNone(notification.read_at)
+        self.assertTrue(Activity.objects.filter(
+            lead=self.lead,
+            kind=Activity.Kind.SYSTEM,
+            content='Follow-up completed. Next action scheduled.',
+            created_by=self.salesperson,
+        ).exists())
+
+    def test_reschedule_locks_the_open_task_and_resolves_its_notification(self):
+        task = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=timezone.now() - timedelta(hours=1),
+            description='Call Ali',
+            status=FollowUpTask.Status.OVERDUE,
+        )
+        notification = Notification.objects.create(
+            business=self.business,
+            task=task,
+            recipient=self.salesperson,
+        )
+        self.client.force_authenticate(self.salesperson)
+        new_due_at = timezone.now() + timedelta(days=2)
+
+        response = self.client.post(
+            reverse('follow-up-task-reschedule', args=[task.id]),
+            {'due_at': new_due_at.isoformat()},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        notification.refresh_from_db()
+        self.assertEqual(task.status, FollowUpTask.Status.PENDING)
+        self.assertIsNotNone(notification.read_at)
+        self.assertTrue(Activity.objects.filter(
+            lead=self.lead,
+            kind=Activity.Kind.SYSTEM,
+            content='Follow-up rescheduled.',
+            created_by=self.salesperson,
+        ).exists())
+
+    def test_closed_task_cannot_be_rescheduled(self):
+        task = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=timezone.now() + timedelta(days=1),
+            description='Call Ali',
+            status=FollowUpTask.Status.DONE,
+            completed_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.post(
+            reverse('follow-up-task-reschedule', args=[task.id]),
+            {'due_at': (timezone.now() + timedelta(days=2)).isoformat()},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    def test_manager_cancellation_resolves_an_overdue_notification(self):
+        task = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=timezone.now() - timedelta(hours=1),
+            description='Call Ali',
+            status=FollowUpTask.Status.OVERDUE,
+        )
+        notification = Notification.objects.create(
+            business=self.business,
+            task=task,
+            recipient=self.salesperson,
+        )
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.delete(reverse('follow-up-task-detail', args=[task.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        task.refresh_from_db()
+        notification.refresh_from_db()
+        self.assertEqual(task.status, FollowUpTask.Status.CANCELLED)
+        self.assertIsNotNone(notification.read_at)
+        self.assertTrue(Activity.objects.filter(
+            lead=self.lead,
+            kind=Activity.Kind.SYSTEM,
+            content='Follow-up cancelled.',
+            created_by=self.owner,
+        ).exists())
 
 
 class FollowUpServiceTests(APITestCase):

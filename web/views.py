@@ -45,6 +45,7 @@ from core.tenancy import (
 )
 from core.timezones import business_day_bounds
 from followups.models import FollowUpTask
+from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product
 from leads.services import record_lead_capture, record_manual_activity, record_needs_time, transition_lead
@@ -1051,15 +1052,17 @@ class TaskCompleteView(TenantWebMixin, View):
             if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
                 messages.error(request, 'That follow-up is already closed.')
                 return redirect(safe_post_redirect(request, 'web:task-list'))
-            task.mark_done()
-            task.save(update_fields=('status', 'completed_at'))
-            FollowUpTask.objects.create(
-                business=task.business,
-                lead=task.lead,
-                assigned_user=task.assigned_user,
-                due_at=form.cleaned_data['next_due_at'],
-                description=form.cleaned_data['next_description'],
-            )
+            try:
+                complete_task(
+                    task=task,
+                    next_due_at=form.cleaned_data['next_due_at'],
+                    next_description=form.cleaned_data['next_description'],
+                    actor=request.user,
+                )
+            except TaskAlreadyClosedError:
+                messages.error(request, 'That follow-up is already closed.')
+                return redirect(safe_post_redirect(request, 'web:task-list'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         messages.success(request, 'Marked done and the next action is scheduled.')
         return redirect(safe_post_redirect(request, 'web:task-list'))
 
@@ -1071,12 +1074,16 @@ class TaskRescheduleView(TenantWebMixin, View):
         if not form.is_valid():
             messages.error(request, 'Choose a future time to reschedule this follow-up.')
             return redirect(safe_post_redirect(request, 'web:task-list'))
-        if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
-            messages.error(request, 'That follow-up is already closed.')
-            return redirect(safe_post_redirect(request, 'web:task-list'))
-        task.due_at = form.cleaned_data['due_at']
-        task.status = FollowUpTask.Status.PENDING
-        task.save(update_fields=('due_at', 'status'))
+        with transaction.atomic():
+            task = FollowUpTask.objects.for_business(self.get_business()).select_for_update().get(pk=task.pk)
+            if self.get_role() == User.Role.SALESPERSON and task.assigned_user_id != request.user.id:
+                return HttpResponseForbidden('You can only reschedule your own tasks.')
+            try:
+                reschedule_task(task=task, due_at=form.cleaned_data['due_at'], actor=request.user)
+            except TaskAlreadyClosedError:
+                messages.error(request, 'That follow-up is already closed.')
+                return redirect(safe_post_redirect(request, 'web:task-list'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         messages.success(request, 'Follow-up rescheduled.')
         return redirect(safe_post_redirect(request, 'web:task-list'))
 
