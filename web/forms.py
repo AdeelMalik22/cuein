@@ -332,6 +332,8 @@ class CurrentPasswordChangeForm(forms.Form):
 
 
 class TeamUserForm(forms.ModelForm):
+    GLOBAL_ACCOUNT_FIELDS = ('username', 'first_name', 'last_name', 'email', 'phone')
+
     password = forms.CharField(required=False, widget=forms.PasswordInput)
     role = forms.ChoiceField(choices=User.Role.choices)
     is_active = forms.BooleanField(required=False, initial=True)
@@ -352,6 +354,13 @@ class TeamUserForm(forms.ModelForm):
             if self.membership:
                 self.fields['role'].initial = self.membership.role
                 self.fields['is_active'].initial = self.membership.is_active
+            # A person can join several workspaces. Workspace owners may
+            # administer only the role/status of this membership; profile and
+            # password changes belong to the account owner.
+            self.fields.pop('password')
+            for field_name in self.GLOBAL_ACCOUNT_FIELDS:
+                self.fields[field_name].disabled = True
+                self.fields[field_name].help_text = 'Managed by this account owner.'
 
     def clean_password(self):
         value = self.cleaned_data['password']
@@ -379,31 +388,33 @@ class TeamUserForm(forms.ModelForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        if self.cleaned_data['password']:
-            user.set_password(self.cleaned_data['password'])
+        password = self.cleaned_data.get('password')
+        if password:
+            user.set_password(password)
         if commit:
             if self.business is None:
                 raise ValueError('A business is required to save a team membership.')
-            if not user.pk:
-                # Keep the legacy link populated only for newly created
-                # accounts during the transition to membership-based access.
-                user.business = self.business
-                user.role = self.cleaned_data['role']
-                user.is_active = True
-            elif self.cleaned_data.get('is_active'):
-                # A legacy single-workspace deactivation set User.is_active.
-                # Re-enabling this membership must make the account usable
-                # again, while deactivation stays scoped to this workspace.
-                user.is_active = True
-            user.save()
-            Membership.objects.update_or_create(
-                user=user,
-                business=self.business,
-                defaults={
-                    'role': self.cleaned_data['role'],
-                    'is_active': self.cleaned_data.get('is_active', False),
-                },
-            )
+            with transaction.atomic():
+                if not user.pk:
+                    # Keep the legacy link populated only for newly created
+                    # accounts during the transition to membership-based access.
+                    user.business = self.business
+                    user.role = self.cleaned_data['role']
+                    user.is_active = True
+                elif self.cleaned_data.get('is_active'):
+                    # A legacy single-workspace deactivation set User.is_active.
+                    # Re-enabling this membership must make the account usable
+                    # again, while deactivation stays scoped to this workspace.
+                    user.is_active = True
+                user.save()
+                Membership.objects.update_or_create(
+                    user=user,
+                    business=self.business,
+                    defaults={
+                        'role': self.cleaned_data['role'],
+                        'is_active': self.cleaned_data.get('is_active', False),
+                    },
+                )
         return user
 
 

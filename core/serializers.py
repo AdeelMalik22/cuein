@@ -1,6 +1,7 @@
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from rest_framework import serializers
 
 from .authentication import revoke_refresh_tokens_for_user
@@ -64,6 +65,12 @@ class CurrentUserSerializer(serializers.ModelSerializer):
 
 
 class TeamUserSerializer(serializers.ModelSerializer):
+    """Manage a person's membership without exposing their global account."""
+
+    GLOBAL_ACCOUNT_FIELDS = frozenset(
+        ('username', 'first_name', 'last_name', 'email', 'phone', 'password'),
+    )
+
     password = serializers.CharField(write_only=True, required=False, style={'input_type': 'password'})
     role = serializers.ChoiceField(choices=User.Role.choices, required=False)
     is_active = serializers.BooleanField(required=False)
@@ -81,6 +88,12 @@ class TeamUserSerializer(serializers.ModelSerializer):
         if not self.instance and not attrs.get('password'):
             raise serializers.ValidationError({'password': 'This field is required when creating a user.'})
         if self.instance:
+            global_account_fields = self.GLOBAL_ACCOUNT_FIELDS.intersection(attrs)
+            if global_account_fields:
+                raise serializers.ValidationError({
+                    field: 'This is a global account field. The account owner must change it themselves.'
+                    for field in global_account_fields
+                })
             business = active_business(self.context['request'])
             membership = Membership.objects.get(user=self.instance, business=business)
             new_role = attrs.get('role', membership.role)
@@ -106,19 +119,20 @@ class TeamUserSerializer(serializers.ModelSerializer):
         # Populate the legacy fields for a brand-new account too.  They are
         # not used for authorization, but keep older integrations functional
         # until the bridge can be removed in a later migration.
-        user = User.objects.create_user(
-            password=password,
-            business=business,
-            role=role,
-            is_active=True,
-            **validated_data,
-        )
-        Membership.objects.create(
-            user=user,
-            business=business,
-            role=role,
-            is_active=membership_is_active,
-        )
+        with transaction.atomic():
+            user = User.objects.create_user(
+                password=password,
+                business=business,
+                role=role,
+                is_active=True,
+                **validated_data,
+            )
+            Membership.objects.create(
+                user=user,
+                business=business,
+                role=role,
+                is_active=membership_is_active,
+            )
         return user
 
     def update(self, instance, validated_data):

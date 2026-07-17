@@ -181,6 +181,31 @@ class BusinessAndTeamApiTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_owner_cannot_change_a_shared_members_global_account(self):
+        Membership.objects.create(
+            user=self.other_user,
+            business=self.business,
+            role=User.Role.SALESPERSON,
+        )
+        original_email = self.other_user.email
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.patch(
+            reverse('user-detail', args=[self.other_user.id]),
+            {
+                'email': 'replaced@example.com',
+                'password': 'Strong-replacement-password-123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertIn('password', response.data)
+        self.other_user.refresh_from_db()
+        self.assertEqual(self.other_user.email, original_email)
+        self.assertTrue(self.other_user.check_password('test-password'))
+
     def test_owner_creates_user_inside_own_business(self):
         self.client.force_authenticate(self.owner)
 
