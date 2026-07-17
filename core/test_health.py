@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -10,6 +11,7 @@ class HealthEndpointTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'status': 'ok'})
+        self.assertEqual(response['X-Request-ID'], str(uuid.UUID(response['X-Request-ID'])))
 
     @patch('cuein.health._cache_is_available', return_value=True)
     @patch('cuein.health._database_is_available', return_value=True)
@@ -27,7 +29,8 @@ class HealthEndpointTests(SimpleTestCase):
     @patch('cuein.health._cache_is_available', return_value=False)
     @patch('cuein.health._database_is_available', return_value=True)
     def test_readiness_reports_unavailable_dependencies(self, database_check, cache_check):
-        response = self.client.get(reverse('readyz'))
+        with self.assertLogs('django.request', level='ERROR'):
+            response = self.client.get(reverse('readyz'))
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(

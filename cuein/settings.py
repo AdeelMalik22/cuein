@@ -106,6 +106,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'core.logging.RequestIdMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -115,6 +116,53 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
+
+DJANGO_LOG_FORMAT = os.environ.get('DJANGO_LOG_FORMAT', 'json' if IS_PRODUCTION else 'plain').lower()
+if DJANGO_LOG_FORMAT not in {'json', 'plain'}:
+    raise ImproperlyConfigured('DJANGO_LOG_FORMAT must be either "json" or "plain".')
+
+DJANGO_LOG_LEVEL = os.environ.get('DJANGO_LOG_LEVEL', 'INFO').upper()
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'request_id': {
+            '()': 'core.logging.RequestIdFilter',
+        },
+    },
+    'formatters': {
+        'plain': {
+            'format': '{asctime} {levelname} {name} request_id={request_id} {message}',
+            'style': '{',
+        },
+        'json': {
+            '()': 'core.logging.JsonFormatter',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'filters': ['request_id'],
+            'formatter': DJANGO_LOG_FORMAT,
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': DJANGO_LOG_LEVEL,
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
 
 ROOT_URLCONF = 'cuein.urls'
 

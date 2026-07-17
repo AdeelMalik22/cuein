@@ -197,6 +197,11 @@ and `GET /readyz/` for dependency readiness. WhiteNoise serves collected static
 assets; serve uploaded `MEDIA_ROOT` files through the proxy or object storage in
 production, because Django only serves media files directly while `DEBUG=true`.
 
+Production logs use compact JSON by default and every Django response includes
+an `X-Request-ID` header. Send that ID with a support report to correlate it
+with server logs. Set `DJANGO_LOG_FORMAT=plain` for human-readable local logs,
+or adjust `DJANGO_LOG_LEVEL` when investigating a problem.
+
 ## Container stack
 
 For a repeatable single-host stack, copy `.env.example` to `.env`, set a real
