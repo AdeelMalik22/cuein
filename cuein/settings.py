@@ -68,7 +68,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 ALLOWED_HOSTS = [
-    "18.212.153.6",
+    "184.73.123.169",
     "ec2-18-212-153-6.compute-1.amazonaws.com",
     "127.0.0.1"
 ]
