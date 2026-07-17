@@ -1,0 +1,50 @@
+{% extends 'web/base.html' %}
+{% block body_class %}notification-page{% endblock %}
+{% block title %}Notifications · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading notification-page-heading">
+    <div><p class="eyebrow">ATTENTION QUEUE</p><h1>Notifications</h1><p>Overdue follow-ups are collected here until you have seen them or moved the task forward.</p></div>
+    <div class="task-overview" aria-label="Unread notifications"><span>Unread</span><strong>{{ unread_notification_count }}</strong><em>{% if unread_notification_count %}Needs a look{% else %}All caught up{% endif %}</em></div>
+  </section>
+  <section class="notification-workspace panel">
+    <header class="notification-toolbar">
+      <nav class="task-filter-tabs" aria-label="Filter notifications">
+        <a class="task-filter-tab {% if not selected_status %}is-active{% endif %}" href="{% url 'web:notification-list' %}"><span>All</span></a>
+        <a class="task-filter-tab {% if selected_status == 'unread' %}is-active{% endif %}" href="?status=unread"><span>Unread</span><b>{{ unread_notification_count }}</b></a>
+      </nav>
+      {% if page_obj.paginator.count %}<p class="task-list-range">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }}</p>{% endif %}
+    </header>
+    <div class="notification-list">
+      {% for notification in notifications %}
+        <article class="notification-row {% if not notification.read_at %}is-unread{% endif %}">
+          <span class="notification-mark" aria-hidden="true">!</span>
+          <div class="notification-copy">
+            <p class="eyebrow">OVERDUE FOLLOW-UP</p>
+            <h2>{{ notification.task.lead.customer_name }}</h2>
+            <p>{{ notification.task.description }}</p>
+            <small>Due {{ notification.task.due_at|date:'D, M j · g:i A' }}{% if is_manager %} · Assigned to {{ notification.task.assigned_user.get_full_name|default:notification.task.assigned_user.username }}{% endif %}</small>
+          </div>
+          <div class="notification-actions">
+            <a class="text-button" href="{% url 'web:task-list' %}">Open task</a>
+            {% if not notification.read_at %}
+              <form method="post" action="{% url 'web:notification-read' notification.pk %}">
+                {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="text-button" type="submit">Mark read</button>
+              </form>
+            {% else %}
+              <span class="notification-read">Read</span>
+            {% endif %}
+          </div>
+        </article>
+      {% empty %}
+        <div class="task-empty-state"><p class="eyebrow">ALL CLEAR</p><h2>No notifications here.</h2><p>When a follow-up becomes overdue, you will see it here.</p></div>
+      {% endfor %}
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pagination task-pagination" aria-label="Notification pages">
+        {% if page_obj.has_previous %}<a class="task-pagination-link" href="?page={{ page_obj.previous_page_number }}{% if query_string %}&amp;{{ query_string }}{% endif %}">← Previous</a>{% else %}<span class="task-pagination-link is-disabled">← Previous</span>{% endif %}
+        <span class="task-page-summary">Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} <i aria-hidden="true">•</i> Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a class="task-pagination-link" href="?page={{ page_obj.next_page_number }}{% if query_string %}&amp;{{ query_string }}{% endif %}">Next →</a>{% else %}<span class="task-pagination-link is-disabled">Next →</span>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

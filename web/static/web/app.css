@@ -448,6 +448,20 @@ a.nav-item:hover, .nav-item:hover, .nav-item.active {
     width: 18px;
 }
 
+.nav-badge {
+    align-items: center;
+    background: var(--accent);
+    border-radius: 999px;
+    color: #fff8f4;
+    display: inline-flex;
+    font-size: .62rem;
+    height: 18px;
+    justify-content: center;
+    margin-left: auto;
+    min-width: 18px;
+    padding: 0 .32rem;
+}
+
 .nav-divider {
     background: #343432;
     height: 1px;
@@ -2250,6 +2264,107 @@ input::placeholder, textarea::placeholder {
     color: var(--muted);
     margin: .55rem auto 0;
     max-width: 390px;
+}
+
+.notification-workspace {
+    margin-top: 1.2rem;
+    padding: 0;
+}
+
+.notification-toolbar {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+    padding: .9rem 1.1rem;
+}
+
+.notification-list {
+    display: grid;
+}
+
+.notification-row {
+    align-items: center;
+    border-top: 1px solid var(--line);
+    display: grid;
+    gap: .9rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding: 1rem 1.1rem;
+}
+
+.notification-row:first-child {
+    border-top: 0;
+}
+
+.notification-row.is-unread {
+    background: #fff8f5;
+}
+
+.notification-mark {
+    align-items: center;
+    background: #f6d9d1;
+    border-radius: 50%;
+    color: var(--accent);
+    display: inline-flex;
+    font-size: .82rem;
+    font-weight: 800;
+    height: 28px;
+    justify-content: center;
+    width: 28px;
+}
+
+.notification-copy .eyebrow {
+    color: var(--accent);
+    font-size: .59rem;
+}
+
+.notification-copy h2 {
+    font-size: 1rem;
+    margin-top: .12rem;
+}
+
+.notification-copy > p:not(.eyebrow),
+.notification-copy small {
+    color: var(--muted);
+    display: block;
+    font-size: .78rem;
+    margin-top: .2rem;
+}
+
+.notification-actions {
+    align-items: center;
+    display: flex;
+    gap: .75rem;
+}
+
+.notification-actions form {
+    margin: 0;
+}
+
+.notification-read {
+    color: var(--muted);
+    font-size: .72rem;
+    font-weight: 700;
+}
+
+@media (max-width: 680px) {
+    .notification-toolbar,
+    .notification-row {
+        align-items: flex-start;
+    }
+
+    .notification-toolbar {
+        flex-direction: column;
+    }
+
+    .notification-row {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .notification-actions {
+        grid-column: 2;
+    }
 }
 
 /* Management, settings and reports */

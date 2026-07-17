@@ -45,7 +45,7 @@ from core.tenancy import (
     users_for_business,
 )
 from core.timezones import business_day_bounds
-from followups.models import FollowUpTask
+from followups.models import FollowUpTask, Notification
 from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product
@@ -332,6 +332,10 @@ class TenantWebMixin(LoginRequiredMixin):
             'is_manager': self.is_manager(),
             'is_owner': self.get_role() == User.Role.OWNER,
             'is_salesperson': self.get_role() == User.Role.SALESPERSON,
+            'unread_notification_count': Notification.objects.for_business(self.get_business()).filter(
+                recipient=self.request.user,
+                read_at__isnull=True,
+            ).count(),
         }
 
 
@@ -1087,6 +1091,45 @@ class TaskRescheduleView(TenantWebMixin, View):
             transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         messages.success(request, 'Follow-up rescheduled.')
         return redirect(safe_post_redirect(request, 'web:task-list'))
+
+
+class NotificationListView(TenantWebMixin, ListView):
+    template_name = 'web/notification_list.html'
+    context_object_name = 'notifications'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = Notification.objects.for_business(self.get_business()).filter(
+            recipient=self.request.user,
+        ).select_related('task', 'task__lead', 'task__assigned_user')
+        if self.request.GET.get('status') == 'unread':
+            queryset = queryset.filter(read_at__isnull=True)
+        return queryset.order_by('-created_at', '-id')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        context.update(self.common_context())
+        context.update({
+            'selected_status': self.request.GET.get('status', ''),
+            'query_string': query_params.urlencode(),
+        })
+        return context
+
+
+class NotificationReadView(TenantWebMixin, View):
+    def post(self, request, pk):
+        with transaction.atomic():
+            notification = get_object_or_404(
+                Notification.objects.for_business(self.get_business()).select_for_update(),
+                pk=pk,
+                recipient=request.user,
+            )
+            if notification.read_at is None:
+                notification.read_at = timezone.now()
+                notification.save(update_fields=('read_at',))
+        return redirect(safe_post_redirect(request, 'web:notification-list'))
 
 
 class TeamListView(OwnerRequiredMixin, TemplateView):

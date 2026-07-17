@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.models import Business, PasswordResetRequest, PendingRegistration, User
-from followups.models import FollowUpTask
+from followups.models import FollowUpTask, Notification
 from leads.models import Activity, Lead, Product
 from web.views import DashboardView
 
@@ -882,3 +882,76 @@ class TaskListPaginationTests(TestCase):
         self.assertEqual(pending_page_two.context['page_obj'].paginator.count, 12)
         self.assertContains(pending_page_two, 'Showing 11–12 of 12')
         self.assertContains(pending_page_two, 'status=pending')
+
+
+class NotificationWebTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='owner', password='test-password', business=self.business, role=User.Role.OWNER,
+        )
+        self.lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Ayesha',
+            phone='03000000000',
+            assigned_user=self.owner,
+        )
+        self.task = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.owner,
+            due_at=timezone.now() - timedelta(hours=1),
+            description='Call Ayesha',
+            status=FollowUpTask.Status.OVERDUE,
+        )
+        self.notification = Notification.objects.create(
+            business=self.business,
+            task=self.task,
+            recipient=self.owner,
+        )
+        self.other_business = Business.objects.create(name='Bright CCTV')
+        self.other_user = User.objects.create_user(
+            username='other', password='test-password', business=self.other_business, role=User.Role.OWNER,
+        )
+        other_lead = Lead.objects.create(
+            business=self.other_business,
+            customer_name='Private lead',
+            phone='03110000000',
+            assigned_user=self.other_user,
+        )
+        other_task = FollowUpTask.objects.create(
+            business=self.other_business,
+            lead=other_lead,
+            assigned_user=self.other_user,
+            due_at=timezone.now() - timedelta(hours=1),
+            description='Private task',
+            status=FollowUpTask.Status.OVERDUE,
+        )
+        self.other_notification = Notification.objects.create(
+            business=self.other_business,
+            task=other_task,
+            recipient=self.other_user,
+        )
+        self.client.force_login(self.owner)
+
+    def test_notification_list_is_recipient_and_tenant_scoped(self):
+        response = self.client.get(reverse('web:notification-list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Call Ayesha')
+        self.assertContains(response, 'Notifications')
+        self.assertNotContains(response, 'Private task')
+        self.assertEqual(response.context['unread_notification_count'], 1)
+
+    def test_marking_a_notification_read_keeps_the_next_path_internal(self):
+        response = self.client.post(
+            reverse('web:notification-read', args=[self.notification.id]),
+            {'next': 'https://untrusted.example/elsewhere'},
+        )
+
+        self.assertRedirects(response, reverse('web:notification-list'), fetch_redirect_response=False)
+        self.notification.refresh_from_db()
+        self.assertIsNotNone(self.notification.read_at)
+
+        private_response = self.client.post(reverse('web:notification-read', args=[self.other_notification.id]))
+        self.assertEqual(private_response.status_code, 404)
