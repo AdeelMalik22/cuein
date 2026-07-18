@@ -2,9 +2,10 @@ from rest_framework import serializers
 from django.urls import reverse
 
 from core.models import User
-from core.tenancy import active_business, is_active_member_of_business
+from core.tenancy import active_business, active_role, is_active_member_of_business
 
-from .models import Lead, Product
+from .models import Activity, Lead, Product
+from .services import record_manual_activity
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -119,3 +120,42 @@ class LeadAssignmentSerializer(serializers.Serializer):
         if not is_active_member_of_business(user, active_business(request).id):
             raise serializers.ValidationError('The assigned user must be active.')
         return user
+
+
+class ActivitySerializer(serializers.ModelSerializer):
+    """The tenant-safe, user-entered portion of a lead's timeline."""
+
+    lead_name = serializers.CharField(source='lead.customer_name', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    lead = serializers.PrimaryKeyRelatedField(queryset=Lead.objects.all())
+
+    class Meta:
+        model = Activity
+        fields = (
+            'id', 'lead', 'lead_name', 'kind', 'content', 'metadata',
+            'created_by', 'created_by_name', 'created_at',
+        )
+        read_only_fields = ('id', 'metadata', 'created_by', 'created_by_name', 'created_at')
+
+    def validate(self, attrs):
+        request = self.context['request']
+        business = active_business(request)
+        lead = attrs['lead']
+        if lead.business_id != business.id:
+            raise serializers.ValidationError({'lead': 'Select a lead from your business.'})
+        if active_role(request) == User.Role.SALESPERSON and lead.assigned_user_id != request.user.id:
+            raise serializers.ValidationError({'lead': 'You can only add activity to your own leads.'})
+        if attrs.get('kind', Activity.Kind.NOTE) in (Activity.Kind.SYSTEM, Activity.Kind.STAGE_CHANGE):
+            raise serializers.ValidationError({'kind': 'System timeline events cannot be created manually.'})
+        return attrs
+
+    def get_created_by_name(self, activity):
+        return activity.created_by.username if activity.created_by else None
+
+    def create(self, validated_data):
+        return record_manual_activity(
+            lead=validated_data['lead'],
+            actor=self.context['request'].user,
+            kind=validated_data.get('kind', Activity.Kind.NOTE),
+            content=validated_data['content'],
+        )

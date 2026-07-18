@@ -2,6 +2,10 @@ import uuid
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
+
+from .validators import validate_iana_timezone
 
 
 class Business(models.Model):
@@ -52,7 +56,11 @@ class Business(models.Model):
         choices=Industry.choices,
         default=Industry.OTHER,
     )
-    timezone = models.CharField(max_length=64, default='Asia/Karachi')
+    timezone = models.CharField(
+        max_length=64,
+        default='Asia/Karachi',
+        validators=[validate_iana_timezone],
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -117,6 +125,19 @@ class User(AbstractUser):
     email_verified_at = models.DateTimeField(null=True, blank=True)
     email_verification_sent_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta(AbstractUser.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                Lower('username'),
+                name='unique_user_username_case_insensitive',
+            ),
+            models.UniqueConstraint(
+                Lower('email'),
+                condition=~Q(email=''),
+                name='unique_user_email_case_insensitive',
+            ),
+        ]
+
     def __str__(self):
         return self.get_username()
 
@@ -151,7 +172,11 @@ class PendingRegistration(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     business_name = models.CharField(max_length=255)
     industry = models.CharField(max_length=32, choices=Business.Industry.choices, default=Business.Industry.OTHER)
-    timezone = models.CharField(max_length=64, default='Asia/Karachi')
+    timezone = models.CharField(
+        max_length=64,
+        default='Asia/Karachi',
+        validators=[validate_iana_timezone],
+    )
     username = models.CharField(max_length=150, unique=True)
     first_name = models.CharField(max_length=150, blank=True)
     last_name = models.CharField(max_length=150, blank=True)
@@ -166,6 +191,16 @@ class PendingRegistration(models.Model):
     class Meta:
         verbose_name = 'pending registration'
         verbose_name_plural = 'pending registrations'
+        constraints = [
+            models.UniqueConstraint(
+                Lower('username'),
+                name='unique_pending_registration_username_case_insensitive',
+            ),
+            models.UniqueConstraint(
+                Lower('email'),
+                name='unique_pending_registration_email_case_insensitive',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.business_name} ({self.email})'

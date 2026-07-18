@@ -32,6 +32,7 @@ from core.password_reset import (
     send_password_reset_code,
 )
 from core.models import Membership, PendingRegistration, User
+from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
 from core.security import consume_browser_auth_rate_limit
 from core.tenancy import (
@@ -43,11 +44,12 @@ from core.tenancy import (
     resolve_web_membership,
     users_for_business,
 )
-from followups.models import FollowUpTask
-from followups.rules import DELAYED_FOLLOWUP, rule_for_stage
-from followups.tasks import schedule_follow_up
+from core.timezones import business_day_bounds
+from followups.models import FollowUpTask, Notification
+from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product
+from leads.services import record_lead_capture, record_manual_activity, record_needs_time, transition_lead
 
 from .forms import (
     ActivityForm,
@@ -330,6 +332,10 @@ class TenantWebMixin(LoginRequiredMixin):
             'is_manager': self.is_manager(),
             'is_owner': self.get_role() == User.Role.OWNER,
             'is_salesperson': self.get_role() == User.Role.SALESPERSON,
+            'unread_notification_count': Notification.objects.for_business(self.get_business()).filter(
+                recipient=self.request.user,
+                read_at__isnull=True,
+            ).count(),
         }
 
 
@@ -456,6 +462,7 @@ class DashboardView(TenantWebMixin, TemplateView):
         business_timezone = ZoneInfo(business.timezone)
         dashboard_now = timezone.localtime(now, timezone=business_timezone)
         today = dashboard_now.date()
+        today_start, tomorrow_start = business_day_bounds(business.timezone, now=now)
         dashboard_greeting = self.greeting_for_hour(dashboard_now.hour)
         leads = self.visible_leads()
         active_leads = leads.exclude(stage__in=(Lead.Stage.WON, Lead.Stage.LOST))
@@ -586,7 +593,11 @@ class DashboardView(TenantWebMixin, TemplateView):
         for teammate in users_for_business(business).order_by('first_name', 'username'):
             member_leads = active_leads.filter(assigned_user=teammate)
             member_stalled = member_leads.filter(last_activity_at__lt=stale_cutoff).count()
-            member_due = open_tasks.filter(assigned_user=teammate, due_at__date=today).count()
+            member_due = open_tasks.filter(
+                assigned_user=teammate,
+                due_at__gte=today_start,
+                due_at__lt=tomorrow_start,
+            ).count()
             team_attention.append({
                 'member': teammate,
                 'active_count': member_leads.count(),
@@ -610,7 +621,10 @@ class DashboardView(TenantWebMixin, TemplateView):
             'today': today,
             'dashboard_now': dashboard_now,
             'dashboard_greeting': dashboard_greeting,
-            'due_today_count': open_tasks.filter(due_at__date=today).count(),
+            'due_today_count': open_tasks.filter(
+                due_at__gte=today_start,
+                due_at__lt=tomorrow_start,
+            ).count(),
             'overdue_count': overdue_tasks.count(),
             'active_leads_count': active_count,
             'pipeline_value': active_leads.aggregate(total=Sum('quoted_price'))['total'] or 0,
@@ -845,18 +859,13 @@ class LeadCreateView(TenantWebMixin, FormView):
         return kwargs
 
     def form_valid(self, form):
-        lead = form.save(commit=False)
-        lead.business = self.get_business()
-        lead.assigned_user = form.cleaned_data.get('assigned_user') or self.request.user
-        lead.save()
-        Activity.objects.create(
-            business=lead.business,
-            lead=lead,
-            kind=Activity.Kind.SYSTEM,
-            content='Lead captured.',
-            created_by=self.request.user,
-        )
-        transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+        with transaction.atomic():
+            lead = form.save(commit=False)
+            lead.business = self.get_business()
+            lead.assigned_user = form.cleaned_data.get('assigned_user') or self.request.user
+            lead.save()
+            record_lead_capture(lead=lead, actor=self.request.user)
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(self.request, f'{lead.customer_name} is now in your pipeline.')
         return redirect('web:lead-detail', pk=lead.pk)
 
@@ -933,38 +942,13 @@ class LeadStageUpdateView(TenantWebMixin, View):
             if self.get_role() == User.Role.SALESPERSON and locked_lead.assigned_user_id != request.user.id:
                 return HttpResponseForbidden('You can only update your own leads.')
 
-            previous_stage = locked_lead.stage
-            locked_lead.stage = next_stage
-            locked_lead.lost_reason = form.cleaned_data.get('lost_reason', '').strip() if next_stage == Lead.Stage.LOST else ''
-            locked_lead.closed_at = timezone.now() if next_stage in (Lead.Stage.WON, Lead.Stage.LOST) else None
-            locked_lead.last_activity_at = timezone.now()
-            locked_lead.save()
-
-            if previous_stage != next_stage:
-                Activity.objects.create(
-                    business=locked_lead.business,
-                    lead=locked_lead,
-                    kind=Activity.Kind.STAGE_CHANGE,
-                    content=(
-                        f'Moved from {Lead.Stage(previous_stage).label} '
-                        f'to {Lead.Stage(next_stage).label}.'
-                    ),
-                    metadata={'from': previous_stage, 'to': next_stage},
-                    created_by=request.user,
-                )
-            if note:
-                Activity.objects.create(
-                    business=locked_lead.business,
-                    lead=locked_lead,
-                    kind=Activity.Kind.NOTE,
-                    content=note,
-                    created_by=request.user,
-                )
-            rule = rule_for_stage(next_stage) if previous_stage != next_stage else None
-            if rule:
-                transaction.on_commit(
-                    lambda: schedule_follow_up.delay(str(locked_lead.business_id), str(locked_lead.id), rule.key),
-                )
+            transition_lead(
+                lead=locked_lead,
+                stage=next_stage,
+                lost_reason=form.cleaned_data.get('lost_reason', ''),
+                note=note,
+                actor=request.user,
+            )
             transaction.on_commit(lambda: invalidate_business_lead_cache(locked_lead.business_id))
 
         if wants_json:
@@ -980,22 +964,12 @@ class LeadStageUpdateView(TenantWebMixin, View):
 class LeadNeedsTimeView(TenantWebMixin, View):
     def post(self, request, pk):
         lead = self.get_visible_lead(pk)
-        if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
-            messages.error(request, 'Closed leads cannot receive another follow-up reminder.')
-            return redirect('web:lead-detail', pk=lead.pk)
         with transaction.atomic():
-            lead.last_activity_at = timezone.now()
-            lead.save(update_fields=('last_activity_at', 'updated_at'))
-            Activity.objects.create(
-                business=lead.business,
-                lead=lead,
-                kind=Activity.Kind.NOTE,
-                content='Customer needs more time. A follow-up has been set for seven days from now.',
-                created_by=request.user,
-            )
-            transaction.on_commit(
-                lambda: schedule_follow_up.delay(str(lead.business_id), str(lead.id), DELAYED_FOLLOWUP.key),
-            )
+            lead = Lead.objects.for_business(self.get_business()).select_for_update().get(pk=lead.pk)
+            if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
+                messages.error(request, 'Closed leads cannot receive another follow-up reminder.')
+                return redirect('web:lead-detail', pk=lead.pk)
+            record_needs_time(lead=lead, actor=request.user)
             transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(request, 'Follow-up set for seven days from now.')
         return redirect('web:lead-detail', pk=lead.pk)
@@ -1006,14 +980,14 @@ class LeadActivityCreateView(TenantWebMixin, View):
         lead = self.get_visible_lead(pk)
         form = ActivityForm(request.POST)
         if form.is_valid():
-            activity = form.save(commit=False)
-            activity.business = lead.business
-            activity.lead = lead
-            activity.created_by = request.user
-            activity.save()
-            lead.last_activity_at = timezone.now()
-            lead.save(update_fields=('last_activity_at', 'updated_at'))
-            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+            with transaction.atomic():
+                record_manual_activity(
+                    lead=lead,
+                    actor=request.user,
+                    kind=form.cleaned_data['kind'],
+                    content=form.cleaned_data['content'],
+                )
+                transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
             messages.success(request, 'Activity added to the timeline.')
         else:
             messages.error(request, 'Add a short note about what happened before saving.')
@@ -1083,15 +1057,17 @@ class TaskCompleteView(TenantWebMixin, View):
             if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
                 messages.error(request, 'That follow-up is already closed.')
                 return redirect(safe_post_redirect(request, 'web:task-list'))
-            task.mark_done()
-            task.save(update_fields=('status', 'completed_at'))
-            FollowUpTask.objects.create(
-                business=task.business,
-                lead=task.lead,
-                assigned_user=task.assigned_user,
-                due_at=form.cleaned_data['next_due_at'],
-                description=form.cleaned_data['next_description'],
-            )
+            try:
+                complete_task(
+                    task=task,
+                    next_due_at=form.cleaned_data['next_due_at'],
+                    next_description=form.cleaned_data['next_description'],
+                    actor=request.user,
+                )
+            except TaskAlreadyClosedError:
+                messages.error(request, 'That follow-up is already closed.')
+                return redirect(safe_post_redirect(request, 'web:task-list'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         messages.success(request, 'Marked done and the next action is scheduled.')
         return redirect(safe_post_redirect(request, 'web:task-list'))
 
@@ -1103,14 +1079,57 @@ class TaskRescheduleView(TenantWebMixin, View):
         if not form.is_valid():
             messages.error(request, 'Choose a future time to reschedule this follow-up.')
             return redirect(safe_post_redirect(request, 'web:task-list'))
-        if task.status not in (FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE):
-            messages.error(request, 'That follow-up is already closed.')
-            return redirect(safe_post_redirect(request, 'web:task-list'))
-        task.due_at = form.cleaned_data['due_at']
-        task.status = FollowUpTask.Status.PENDING
-        task.save(update_fields=('due_at', 'status'))
+        with transaction.atomic():
+            task = FollowUpTask.objects.for_business(self.get_business()).select_for_update().get(pk=task.pk)
+            if self.get_role() == User.Role.SALESPERSON and task.assigned_user_id != request.user.id:
+                return HttpResponseForbidden('You can only reschedule your own tasks.')
+            try:
+                reschedule_task(task=task, due_at=form.cleaned_data['due_at'], actor=request.user)
+            except TaskAlreadyClosedError:
+                messages.error(request, 'That follow-up is already closed.')
+                return redirect(safe_post_redirect(request, 'web:task-list'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(task.business_id))
         messages.success(request, 'Follow-up rescheduled.')
         return redirect(safe_post_redirect(request, 'web:task-list'))
+
+
+class NotificationListView(TenantWebMixin, ListView):
+    template_name = 'web/notification_list.html'
+    context_object_name = 'notifications'
+    paginate_by = 20
+
+    def get_queryset(self):
+        queryset = Notification.objects.for_business(self.get_business()).filter(
+            recipient=self.request.user,
+        ).select_related('task', 'task__lead', 'task__assigned_user')
+        if self.request.GET.get('status') == 'unread':
+            queryset = queryset.filter(read_at__isnull=True)
+        return queryset.order_by('-created_at', '-id')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        context.update(self.common_context())
+        context.update({
+            'selected_status': self.request.GET.get('status', ''),
+            'query_string': query_params.urlencode(),
+        })
+        return context
+
+
+class NotificationReadView(TenantWebMixin, View):
+    def post(self, request, pk):
+        with transaction.atomic():
+            notification = get_object_or_404(
+                Notification.objects.for_business(self.get_business()).select_for_update(),
+                pk=pk,
+                recipient=request.user,
+            )
+            if notification.read_at is None:
+                notification.read_at = timezone.now()
+                notification.save(update_fields=('read_at',))
+        return redirect(safe_post_redirect(request, 'web:notification-list'))
 
 
 class TeamListView(OwnerRequiredMixin, TemplateView):
@@ -1146,11 +1165,11 @@ class ProductListView(OwnerRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         context.update(self.common_context())
         context['products'] = Product.objects.for_business(self.get_business()).order_by('-is_active', 'name')
-        context['form'] = ProductForm()
+        context['form'] = ProductForm(business=self.get_business())
         return context
 
     def post(self, request, *args, **kwargs):
-        form = ProductForm(request.POST)
+        form = ProductForm(request.POST, business=self.get_business())
         if form.is_valid():
             product = form.save(commit=False)
             product.business = self.get_business()
@@ -1177,7 +1196,11 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
         return kwargs
 
     def form_valid(self, form):
-        member = form.save()
+        try:
+            member = form.save()
+        except LastActiveOwnerError as error:
+            form.add_error('role', str(error))
+            return self.form_invalid(form)
         transaction.on_commit(lambda: invalidate_business_lead_cache(self.get_business().id))
         messages.success(self.request, 'Team member updated.')
         return redirect('web:team-list')
@@ -1192,24 +1215,25 @@ class TeamEditView(OwnerRequiredMixin, UpdateView):
 
 class TeamDeleteView(OwnerRequiredMixin, View):
     def post(self, request, pk):
-        membership = get_object_or_404(
-            Membership.objects.select_related('user'),
-            user_id=pk,
-            business=self.get_business(),
-        )
-        if membership.user == request.user:
-            messages.error(request, 'You cannot deactivate your own account.')
-        elif membership.role == User.Role.OWNER and membership.is_active and Membership.objects.filter(
-            business=self.get_business(),
-            role=User.Role.OWNER,
-            is_active=True,
-            user__is_active=True,
-        ).count() == 1:
-            messages.error(request, 'A business must keep at least one active owner.')
-        else:
-            membership.is_active = False
-            membership.save(update_fields=('is_active',))
-            messages.success(request, 'Team member deactivated. Their lead history is still intact.')
+        with transaction.atomic():
+            membership = get_object_or_404(
+                Membership.objects.select_related('user'),
+                user_id=pk,
+                business=self.get_business(),
+            )
+            if membership.user == request.user:
+                messages.error(request, 'You cannot deactivate your own account.')
+            else:
+                try:
+                    update_membership(
+                        membership_id=membership.id,
+                        business=self.get_business(),
+                        is_active=False,
+                    )
+                except LastActiveOwnerError as error:
+                    messages.error(request, str(error))
+                else:
+                    messages.success(request, 'Team member deactivated. Their lead history is still intact.')
         return redirect('web:team-list')
 
 
@@ -1220,6 +1244,11 @@ class ProductEditView(OwnerRequiredMixin, UpdateView):
 
     def get_queryset(self):
         return Product.objects.for_business(self.get_business())
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['business'] = self.get_business()
+        return kwargs
 
     def form_valid(self, form):
         product = form.save()

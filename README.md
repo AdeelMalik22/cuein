@@ -89,7 +89,16 @@ For an account with more than one workspace, obtain a token for a specific busin
 ## Local setup
 
 1. Ensure PostgreSQL is running and create the configured database/user.
-2. Create a root `.env` file with your local connection values:
+2. Copy the safe example configuration, then replace its local PostgreSQL
+   password and any values you need:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   The included Redis URLs work with either Redis or Valkey. Valkey uses the
+   Redis protocol, so no code change is needed—point the URLs at your Valkey
+   instance instead. A minimal root `.env` contains:
 
    ```text
    POSTGRES_DB=cuein
@@ -156,6 +165,10 @@ For an account with more than one workspace, obtain a token for a specific busin
 
    The workspace is available at `http://127.0.0.1:8000/` and the API at `http://127.0.0.1:8000/api/v1/`.
 
+   Deployment probes can use `GET /healthz/` for Django process liveness and
+   `GET /readyz/` for readiness. The readiness probe returns `503` until both
+   PostgreSQL and the shared Redis/Valkey cache are reachable.
+
 5. For asynchronous follow-ups, start Redis and run a Celery worker and scheduler in separate terminals:
 
    ```bash
@@ -164,6 +177,51 @@ For an account with more than one workspace, obtain a token for a specific busin
    ```
 
    Celery uses `redis://127.0.0.1:6379/0` by default. Override `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` in `.env` when Redis runs elsewhere.
+
+## Production server
+
+Do not use `manage.py runserver` in production. After installing the pinned
+dependencies, running migrations, and collecting static files, run Django with
+Gunicorn behind a TLS-terminating reverse proxy or load balancer:
+
+```bash
+python3.10 manage.py migrate --noinput
+python3.10 manage.py collectstatic --noinput
+python3.10 -m gunicorn --bind 127.0.0.1:8000 --workers 3 \
+  --access-logfile - --error-logfile - cuein.wsgi:application
+```
+
+Keep Gunicorn bound to loopback unless the host's network policy and a trusted
+TLS proxy protect it. Configure the proxy to use `GET /healthz/` for liveness
+and `GET /readyz/` for dependency readiness. WhiteNoise serves collected static
+assets; serve uploaded `MEDIA_ROOT` files through the proxy or object storage in
+production, because Django only serves media files directly while `DEBUG=true`.
+
+Production logs use compact JSON by default and every Django response includes
+an `X-Request-ID` header. Send that ID with a support report to correlate it
+with server logs. Set `DJANGO_LOG_FORMAT=plain` for human-readable local logs,
+or adjust `DJANGO_LOG_LEVEL` when investigating a problem.
+
+## Container stack
+
+For a repeatable single-host stack, copy `.env.example` to `.env`, set a real
+PostgreSQL password, then run:
+
+```bash
+docker compose up --build -d
+docker compose ps
+docker compose logs -f web worker beat
+```
+
+Compose starts PostgreSQL and Valkey first, runs migrations and `collectstatic`
+once, then starts Gunicorn, Celery worker, and Celery Beat. PostgreSQL and
+Valkey are intentionally private to the Compose network; only Gunicorn is
+published, and it is bound to `127.0.0.1:8000` for a host reverse proxy. This
+also means a containerized Valkey installation is checked with `docker compose
+ps`, not `systemctl status redis`.
+
+Use a production `.env` with the required `DJANGO_ENV`, secret, host, and SMTP
+settings from the local setup section before exposing the proxy publicly.
 
 ## Important development rule
 

@@ -15,6 +15,7 @@ from .email_verification import (
     EmailVerificationError,
     send_email_verification,
 )
+from .membership_services import LastActiveOwnerError, remove_membership
 from .password_reset import (
     PasswordResetCooldownError,
     PasswordResetDeliveryError,
@@ -221,22 +222,16 @@ class TeamUserViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         if instance.pk == self.request.user.pk:
             raise ValidationError({'detail': 'You cannot delete your own account.'})
-        membership = get_object_or_404(
-            Membership,
-            user=instance,
-            business=active_business(self.request),
-        )
-        if (
-            membership.role == User.Role.OWNER
-            and membership.is_active
-            and Membership.objects.filter(
-                business=membership.business,
-                role=User.Role.OWNER,
-                is_active=True,
-                user__is_active=True,
-            ).count() == 1
-        ):
-            raise ValidationError({'detail': 'A business must keep at least one active owner.'})
-        # Removing a person from one workspace must never delete their global
-        # login or their memberships in other businesses.
-        membership.delete()
+        business = active_business(self.request)
+        with transaction.atomic():
+            membership = get_object_or_404(
+                Membership,
+                user=instance,
+                business=business,
+            )
+            try:
+                # Removing a person from one workspace must never delete their
+                # global login or their memberships in other businesses.
+                remove_membership(membership_id=membership.id, business=business)
+            except LastActiveOwnerError as error:
+                raise ValidationError({'detail': str(error)}) from error

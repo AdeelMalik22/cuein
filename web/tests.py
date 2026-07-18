@@ -15,8 +15,8 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from core.models import Business, PasswordResetRequest, PendingRegistration, User
-from followups.models import FollowUpTask
-from leads.models import Lead, Product
+from followups.models import FollowUpTask, Notification
+from leads.models import Activity, Lead, Product
 from web.views import DashboardView
 
 
@@ -191,7 +191,7 @@ class ProfileAndAvatarTests(TestCase):
                 'first_name': self.owner.first_name,
                 'last_name': self.owner.last_name,
                 'email': self.owner.email,
-                'username': self.teammate.username,
+                'username': self.teammate.username.upper(),
                 'phone': '',
             },
         )
@@ -200,6 +200,18 @@ class ProfileAndAvatarTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.owner.username, 'owner')
         self.assertContains(response, 'This username is already in use.')
+
+    def test_product_form_rejects_a_case_insensitive_duplicate_name(self):
+        Product.objects.create(business=self.business, name='Solar installation')
+
+        response = self.client.post(
+            reverse('web:product-list'),
+            {'name': 'SOLAR INSTALLATION', 'description': '', 'is_active': 'on'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'A product with this name already exists in this business.')
+        self.assertEqual(Product.objects.for_business(self.business).count(), 1)
 
     def test_assignee_picker_shows_profile_photos_and_the_fallback_avatar(self):
         response = self.client.get(reverse('web:lead-create'))
@@ -766,6 +778,43 @@ class LeadBoardPaginationTests(TestCase):
         self.assertContains(filtered, 'Specific matching lead')
 
 
+class LeadWorkflowWebTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='owner', password='test-password', business=self.business, role=User.Role.OWNER,
+        )
+        self.lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Ayesha',
+            phone='03000000000',
+            assigned_user=self.owner,
+        )
+        self.client.force_login(self.owner)
+
+    @patch('leads.services.schedule_follow_up.delay')
+    def test_stage_update_records_the_same_timeline_event_as_the_api(self, schedule_follow_up):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse('web:lead-stage', args=[self.lead.id]),
+                {'stage': Lead.Stage.QUOTATION_SENT, 'lost_reason': '', 'note': ''},
+            )
+
+        self.assertRedirects(
+            response,
+            reverse('web:lead-detail', args=[self.lead.id]),
+            fetch_redirect_response=False,
+        )
+        activity = Activity.objects.get(lead=self.lead, kind=Activity.Kind.STAGE_CHANGE)
+        self.assertEqual(activity.metadata, {
+            'from': Lead.Stage.NEW_INQUIRY,
+            'to': Lead.Stage.QUOTATION_SENT,
+        })
+        schedule_follow_up.assert_called_once_with(
+            str(self.business.id), str(self.lead.id), 'quote_followup_v1',
+        )
+
+
 class TaskListPaginationTests(TestCase):
     def setUp(self):
         self.business = Business.objects.create(name='North Star Solar')
@@ -833,3 +882,76 @@ class TaskListPaginationTests(TestCase):
         self.assertEqual(pending_page_two.context['page_obj'].paginator.count, 12)
         self.assertContains(pending_page_two, 'Showing 11–12 of 12')
         self.assertContains(pending_page_two, 'status=pending')
+
+
+class NotificationWebTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='owner', password='test-password', business=self.business, role=User.Role.OWNER,
+        )
+        self.lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Ayesha',
+            phone='03000000000',
+            assigned_user=self.owner,
+        )
+        self.task = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.owner,
+            due_at=timezone.now() - timedelta(hours=1),
+            description='Call Ayesha',
+            status=FollowUpTask.Status.OVERDUE,
+        )
+        self.notification = Notification.objects.create(
+            business=self.business,
+            task=self.task,
+            recipient=self.owner,
+        )
+        self.other_business = Business.objects.create(name='Bright CCTV')
+        self.other_user = User.objects.create_user(
+            username='other', password='test-password', business=self.other_business, role=User.Role.OWNER,
+        )
+        other_lead = Lead.objects.create(
+            business=self.other_business,
+            customer_name='Private lead',
+            phone='03110000000',
+            assigned_user=self.other_user,
+        )
+        other_task = FollowUpTask.objects.create(
+            business=self.other_business,
+            lead=other_lead,
+            assigned_user=self.other_user,
+            due_at=timezone.now() - timedelta(hours=1),
+            description='Private task',
+            status=FollowUpTask.Status.OVERDUE,
+        )
+        self.other_notification = Notification.objects.create(
+            business=self.other_business,
+            task=other_task,
+            recipient=self.other_user,
+        )
+        self.client.force_login(self.owner)
+
+    def test_notification_list_is_recipient_and_tenant_scoped(self):
+        response = self.client.get(reverse('web:notification-list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Call Ayesha')
+        self.assertContains(response, 'Notifications')
+        self.assertNotContains(response, 'Private task')
+        self.assertEqual(response.context['unread_notification_count'], 1)
+
+    def test_marking_a_notification_read_keeps_the_next_path_internal(self):
+        response = self.client.post(
+            reverse('web:notification-read', args=[self.notification.id]),
+            {'next': 'https://untrusted.example/elsewhere'},
+        )
+
+        self.assertRedirects(response, reverse('web:notification-list'), fetch_redirect_response=False)
+        self.notification.refresh_from_db()
+        self.assertIsNotNone(self.notification.read_at)
+
+        private_response = self.client.post(reverse('web:notification-read', args=[self.other_notification.id]))
+        self.assertEqual(private_response.status_code, 404)

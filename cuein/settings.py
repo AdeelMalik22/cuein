@@ -67,11 +67,6 @@ CSRF_TRUSTED_ORIGINS = [
     if origin.strip()
 ]
 
-ALLOWED_HOSTS = [
-    "184.73.123.169",
-    "ec2-18-212-153-6.compute-1.amazonaws.com",
-    "127.0.0.1"
-]
 SECURE_SSL_REDIRECT = IS_PRODUCTION
 SESSION_COOKIE_SECURE = IS_PRODUCTION
 CSRF_COOKIE_SECURE = IS_PRODUCTION
@@ -111,6 +106,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'core.logging.RequestIdMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -120,6 +116,53 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
 ]
+
+DJANGO_LOG_FORMAT = os.environ.get('DJANGO_LOG_FORMAT', 'json' if IS_PRODUCTION else 'plain').lower()
+if DJANGO_LOG_FORMAT not in {'json', 'plain'}:
+    raise ImproperlyConfigured('DJANGO_LOG_FORMAT must be either "json" or "plain".')
+
+DJANGO_LOG_LEVEL = os.environ.get('DJANGO_LOG_LEVEL', 'INFO').upper()
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'request_id': {
+            '()': 'core.logging.RequestIdFilter',
+        },
+    },
+    'formatters': {
+        'plain': {
+            'format': '{asctime} {levelname} {name} request_id={request_id} {message}',
+            'style': '{',
+        },
+        'json': {
+            '()': 'core.logging.JsonFormatter',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'filters': ['request_id'],
+            'formatter': DJANGO_LOG_FORMAT,
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': DJANGO_LOG_LEVEL,
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
 
 ROOT_URLCONF = 'cuein.urls'
 
@@ -188,12 +231,29 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
-STATICFILES_DIRS = [BASE_DIR / 'web' / 'static']
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # User-uploaded profile pictures. In production these files should be served
 # by the deployment's media storage; Django serves them locally in DEBUG mode.
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Defining STORAGES replaces Django's complete storage registry. Keep an
+# explicit default backend for uploaded profile pictures alongside WhiteNoise
+# for static assets, otherwise accessing ``profile_picture.url`` raises an
+# InvalidStorageError at render time.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+        'OPTIONS': {
+            'location': MEDIA_ROOT,
+            'base_url': MEDIA_URL,
+        },
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 LOGIN_URL = 'web:login'
 LOGIN_REDIRECT_URL = 'web:dashboard'

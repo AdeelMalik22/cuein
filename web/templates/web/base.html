@@ -94,6 +94,9 @@
             </a>{% endcomment %}
           {% endif %}
         {% endif %}
+        <a href="{% url 'web:notification-list' %}" class="nav-item {% if request.resolver_match.url_name == 'notification-list' %}active{% endif %}">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg><span>Notifications</span>{% if unread_notification_count %}<b class="nav-badge">{{ unread_notification_count }}</b>{% endif %}
+        </a>
       </nav>
 
     </aside>

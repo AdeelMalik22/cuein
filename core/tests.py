@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core import mail
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -14,6 +15,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .email_verification import EmailVerificationCooldownError, send_email_verification
+from .membership_services import LastActiveOwnerError, remove_membership
 from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
 from .password_reset import PasswordResetCooldownError, send_password_reset_code
 
@@ -107,6 +109,22 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertIn('six-digit code', mail.outbox[0].body)
         self.assertNotIn('/verify-email/', mail.outbox[0].body)
 
+    def test_signup_rejects_an_invalid_timezone(self):
+        response = self.client.post(
+            reverse('signup'),
+            {
+                'business_name': 'Skyline AC',
+                'username': 'skyline-owner',
+                'password': 'Strong-test-password-123',
+                'email': 'owner@skyline.example',
+                'timezone': 'Not/A-Timezone',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('timezone', response.data)
+
     def test_verification_code_creates_the_owner_and_returns_tokens(self):
         PendingRegistration.objects.create(
             business_name='Verified AC',
@@ -146,12 +164,49 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertEqual(self.business.name, 'North Star Energy')
         self.assertEqual(self.other_business.name, 'Bright CCTV')
 
+    def test_owner_cannot_set_an_invalid_business_timezone(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.patch(
+            reverse('current_business'),
+            {'timezone': 'Not/A-Timezone'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('timezone', response.data)
+
     def test_owner_cannot_retrieve_a_user_from_another_business(self):
         self.client.force_authenticate(self.owner)
 
         response = self.client.get(reverse('user-detail', args=[self.other_user.id]))
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_owner_cannot_change_a_shared_members_global_account(self):
+        Membership.objects.create(
+            user=self.other_user,
+            business=self.business,
+            role=User.Role.SALESPERSON,
+        )
+        original_email = self.other_user.email
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.patch(
+            reverse('user-detail', args=[self.other_user.id]),
+            {
+                'email': 'replaced@example.com',
+                'password': 'Strong-replacement-password-123',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('email', response.data)
+        self.assertIn('password', response.data)
+        self.other_user.refresh_from_db()
+        self.assertEqual(self.other_user.email, original_email)
+        self.assertTrue(self.other_user.check_password('test-password'))
 
     def test_owner_creates_user_inside_own_business(self):
         self.client.force_authenticate(self.owner)
@@ -169,6 +224,89 @@ class BusinessAndTeamApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         new_user = User.objects.get(username='salesperson')
         self.assertEqual(new_user.business, self.business)
+
+    def test_owner_cannot_demote_the_last_active_owner(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.patch(
+            reverse('user-detail', args=[self.owner.id]),
+            {'role': User.Role.MANAGER},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('role', response.data)
+        membership = Membership.objects.get(user=self.owner, business=self.business)
+        self.assertEqual(membership.role, User.Role.OWNER)
+
+    def test_owner_can_remove_a_second_owner_and_the_service_preserves_the_last_one(self):
+        second_owner = User.objects.create_user(
+            username='second-owner',
+            password='test-password',
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        Membership.objects.create(
+            user=second_owner,
+            business=self.business,
+            role=User.Role.OWNER,
+        )
+        self.client.force_authenticate(self.owner)
+
+        removed = self.client.delete(reverse('user-detail', args=[second_owner.id]))
+
+        self.assertEqual(removed.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Membership.objects.filter(user=second_owner, business=self.business).exists())
+        owner_membership = Membership.objects.get(user=self.owner, business=self.business)
+        with self.assertRaises(LastActiveOwnerError):
+            with transaction.atomic():
+                remove_membership(membership_id=owner_membership.id, business=self.business)
+        self.assertTrue(Membership.objects.filter(pk=owner_membership.id).exists())
+
+    def test_user_identity_is_unique_case_insensitively(self):
+        User.objects.create_user(
+            username='Email-Owner',
+            email='owner@example.com',
+            password='test-password',
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            User.objects.create_user(
+                username='email-owner',
+                email='different@example.com',
+                password='test-password',
+            )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            User.objects.create_user(
+                username='duplicate-email-owner',
+                email='OWNER@example.com',
+                password='test-password',
+            )
+
+    def test_pending_registration_identity_is_unique_case_insensitively(self):
+        PendingRegistration.objects.create(
+            business_name='Pending Solar',
+            username='Pending-Owner',
+            email='pending@example.com',
+            password=make_password('test-password'),
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PendingRegistration.objects.create(
+                business_name='Another Pending Solar',
+                username='pending-owner',
+                email='different@example.com',
+                password=make_password('test-password'),
+            )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PendingRegistration.objects.create(
+                business_name='Another Pending Solar',
+                username='different-pending-owner',
+                email='PENDING@example.com',
+                password=make_password('test-password'),
+            )
 
 
 @override_settings(

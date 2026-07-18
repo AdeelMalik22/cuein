@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.idea
+.pytest_cache
+.mypy_cache
+__pycache__
+*.py[cod]
+venv
+.venv
+media
+staticfiles
+postman
+seed.py
+seeded_credentials.md

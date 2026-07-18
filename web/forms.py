@@ -9,6 +9,7 @@ from django.utils.text import slugify
 from zoneinfo import available_timezones
 
 from core.captcha import captcha_enabled, verify_turnstile
+from core.membership_services import update_membership
 from core.models import Business, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
@@ -198,7 +199,9 @@ class SignupForm(forms.Form):
         base_username = slugify(email.split('@', 1)[0]).replace('-', '')[:140] or 'owner'
         username = base_username
         suffix = 2
-        while User.objects.filter(username=username).exists() or PendingRegistration.objects.filter(username=username).exists():
+        while User.objects.filter(username__iexact=username).exists() or PendingRegistration.objects.filter(
+            username__iexact=username,
+        ).exists():
             username = f'{base_username[:140]}{suffix}'
             suffix += 1
         return PendingRegistration.objects.create(
@@ -332,6 +335,8 @@ class CurrentPasswordChangeForm(forms.Form):
 
 
 class TeamUserForm(forms.ModelForm):
+    GLOBAL_ACCOUNT_FIELDS = ('username', 'first_name', 'last_name', 'email', 'phone')
+
     password = forms.CharField(required=False, widget=forms.PasswordInput)
     role = forms.ChoiceField(choices=User.Role.choices)
     is_active = forms.BooleanField(required=False, initial=True)
@@ -352,6 +357,13 @@ class TeamUserForm(forms.ModelForm):
             if self.membership:
                 self.fields['role'].initial = self.membership.role
                 self.fields['is_active'].initial = self.membership.is_active
+            # A person can join several workspaces. Workspace owners may
+            # administer only the role/status of this membership; profile and
+            # password changes belong to the account owner.
+            self.fields.pop('password')
+            for field_name in self.GLOBAL_ACCOUNT_FIELDS:
+                self.fields[field_name].disabled = True
+                self.fields[field_name].help_text = 'Managed by this account owner.'
 
     def clean_password(self):
         value = self.cleaned_data['password']
@@ -360,6 +372,26 @@ class TeamUserForm(forms.ModelForm):
         elif not self.instance.pk:
             raise ValidationError('A password is required for a new team member.')
         return value
+
+    def clean_username(self):
+        username = self.cleaned_data['username'].strip()
+        other_users = User.objects.exclude(pk=self.instance.pk)
+        if other_users.filter(username__iexact=username).exists() or PendingRegistration.objects.filter(
+            username__iexact=username,
+        ).exists():
+            raise ValidationError('This username is already in use.')
+        return username
+
+    def clean_email(self):
+        email = self.cleaned_data['email'].strip().lower()
+        if not email:
+            return email
+        other_users = User.objects.exclude(pk=self.instance.pk)
+        if other_users.filter(email__iexact=email).exists() or PendingRegistration.objects.filter(
+            email__iexact=email,
+        ).exists():
+            raise ValidationError('An account already uses this email address.')
+        return email
 
     def clean(self):
         cleaned_data = super().clean()
@@ -379,38 +411,63 @@ class TeamUserForm(forms.ModelForm):
 
     def save(self, commit=True):
         user = super().save(commit=False)
-        if self.cleaned_data['password']:
-            user.set_password(self.cleaned_data['password'])
+        password = self.cleaned_data.get('password')
+        if password:
+            user.set_password(password)
         if commit:
             if self.business is None:
                 raise ValueError('A business is required to save a team membership.')
-            if not user.pk:
-                # Keep the legacy link populated only for newly created
-                # accounts during the transition to membership-based access.
-                user.business = self.business
-                user.role = self.cleaned_data['role']
-                user.is_active = True
-            elif self.cleaned_data.get('is_active'):
-                # A legacy single-workspace deactivation set User.is_active.
-                # Re-enabling this membership must make the account usable
-                # again, while deactivation stays scoped to this workspace.
-                user.is_active = True
-            user.save()
-            Membership.objects.update_or_create(
-                user=user,
-                business=self.business,
-                defaults={
-                    'role': self.cleaned_data['role'],
-                    'is_active': self.cleaned_data.get('is_active', False),
-                },
-            )
+            with transaction.atomic():
+                if not user.pk:
+                    # Keep the legacy link populated only for newly created
+                    # accounts during the transition to membership-based access.
+                    user.business = self.business
+                    user.role = self.cleaned_data['role']
+                    user.is_active = True
+                elif self.cleaned_data.get('is_active'):
+                    # A legacy single-workspace deactivation set User.is_active.
+                    # Re-enabling this membership must make the account usable
+                    # again, while deactivation stays scoped to this workspace.
+                    user.is_active = True
+                user.save()
+                if user.pk and self.membership:
+                    update_membership(
+                        membership_id=self.membership.id,
+                        business=self.business,
+                        role=self.cleaned_data['role'],
+                        is_active=self.cleaned_data.get('is_active', False),
+                    )
+                else:
+                    Membership.objects.update_or_create(
+                        user=user,
+                        business=self.business,
+                        defaults={
+                            'role': self.cleaned_data['role'],
+                            'is_active': self.cleaned_data.get('is_active', False),
+                        },
+                    )
         return user
 
 
 class ProductForm(forms.ModelForm):
+    def __init__(self, *args, business=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.business = business
+
     class Meta:
         model = Product
         fields = ('name', 'description', 'is_active')
+
+    def clean_name(self):
+        name = self.cleaned_data['name'].strip()
+        if self.business is None:
+            return name
+        products = Product.objects.for_business(self.business).filter(name__iexact=name)
+        if self.instance.pk:
+            products = products.exclude(pk=self.instance.pk)
+        if products.exists():
+            raise ValidationError('A product with this name already exists in this business.')
+        return name
 
 
 class BusinessForm(forms.ModelForm):
