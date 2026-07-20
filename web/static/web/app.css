@@ -6738,8 +6738,7 @@ body.task-queue-page .task-page-summary i {
     color: #a74633;
 }
 
-.schedule-site-visit,
-.reschedule-site-visit {
+.schedule-site-visit {
     border-top: 1px solid var(--line);
     margin-top: .55rem;
     padding-top: .75rem;
@@ -6764,9 +6763,34 @@ body.task-queue-page .task-page-summary i {
     justify-content: space-between;
 }
 
-.schedule-site-visit[open] summary,
-.reschedule-site-visit[open] summary {
+.schedule-site-visit[open] summary {
     margin-bottom: .75rem;
+}
+
+/* Keep Reschedule alongside Complete and Cancel. When opened, only its form
+   expands to a new full-width row instead of leaving the trigger detached. */
+.reschedule-site-visit {
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.reschedule-site-visit summary {
+    align-items: center;
+    display: inline-flex;
+    font-size: .7rem;
+    min-height: 1rem;
+}
+
+.reschedule-site-visit[open] {
+    flex-basis: 100%;
+    width: 100%;
+}
+
+.reschedule-site-visit[open] .inline-form {
+    border-top: 1px solid var(--line);
+    margin-top: .7rem;
+    padding-top: .8rem;
 }
 
 .site-visits-panel input[type="checkbox"] {
