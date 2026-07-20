@@ -117,6 +117,73 @@ class Lead(TenantScopedModel):
         super().save(*args, **kwargs)
 
 
+class SiteVisit(TenantScopedModel):
+    """A scheduled on-site appointment for one lead.
+
+    A lead may need more than one visit (for example, an initial inspection and
+    a later measurement), so visits are records of their own rather than
+    mutable fields on ``Lead``.
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = 'scheduled', 'Scheduled'
+        COMPLETED = 'completed', 'Completed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='site_visits')
+    scheduled_at = models.DateTimeField()
+    address = models.TextField(blank=True)
+    assigned_user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='site_visits',
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SCHEDULED)
+    reminder_enabled = models.BooleanField(default=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=('business', 'status', 'scheduled_at'), name='visit_biz_status_time_idx'),
+            models.Index(fields=('business', 'assigned_user', 'scheduled_at'), name='visit_biz_user_time_idx'),
+            models.Index(fields=('business', 'lead', 'scheduled_at'), name='visit_biz_lead_time_idx'),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.business_id and self.lead_id and self.lead.business_id != self.business_id:
+            errors['lead'] = 'The lead must belong to the same business.'
+        if self.business_id and self.assigned_user_id and not belongs_to_business(
+            self.assigned_user_id,
+            self.business_id,
+        ):
+            errors['assigned_user'] = 'The assigned user must belong to the same business.'
+        if self.status == self.Status.SCHEDULED and (self.completed_at or self.cancelled_at):
+            errors['status'] = 'A scheduled visit cannot have a completion or cancellation time.'
+        elif self.status == self.Status.COMPLETED:
+            if not self.completed_at:
+                errors['completed_at'] = 'Completed visits require a completion time.'
+            if self.cancelled_at:
+                errors['cancelled_at'] = 'A completed visit cannot have a cancellation time.'
+        elif self.status == self.Status.CANCELLED:
+            if not self.cancelled_at:
+                errors['cancelled_at'] = 'Cancelled visits require a cancellation time.'
+            if self.completed_at:
+                errors['completed_at'] = 'A cancelled visit cannot have a completion time.'
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f'Site visit for {self.lead} at {self.scheduled_at:%Y-%m-%d %H:%M}'
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 class Activity(TenantScopedModel):
     """A small, append-only record of what happened with a lead."""
 

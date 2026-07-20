@@ -20,7 +20,7 @@ from .cache import (
     invalidate_business_lead_cache,
     lead_api_cache_key,
 )
-from .models import Activity, Lead, Product
+from .models import Activity, Lead, Product, SiteVisit
 from .serializers import (
     ActivitySerializer,
     LeadAssignmentSerializer,
@@ -28,8 +28,20 @@ from .serializers import (
     LeadSerializer,
     LeadTransitionSerializer,
     ProductSerializer,
+    SiteVisitCreateSerializer,
+    SiteVisitRescheduleSerializer,
+    SiteVisitSerializer,
 )
-from .services import record_lead_capture, record_needs_time, transition_lead
+from .services import (
+    SiteVisitAlreadyClosedError,
+    cancel_site_visit,
+    complete_site_visit,
+    record_lead_capture,
+    record_needs_time,
+    reschedule_site_visit,
+    schedule_site_visit,
+    transition_lead,
+)
 
 
 class LeadPageNumberPagination(PageNumberPagination):
@@ -104,6 +116,123 @@ class ActivityViewSet(
         with transaction.atomic():
             activity = serializer.save()
             transaction.on_commit(lambda: invalidate_business_lead_cache(activity.business_id))
+
+
+class SiteVisitViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Tenant-scoped site-visit appointments and their lifecycle actions."""
+
+    serializer_class = SiteVisitSerializer
+    permission_classes = (IsAuthenticated,)
+    filter_backends = (filters.OrderingFilter,)
+    ordering_fields = ('scheduled_at', 'created_at', 'updated_at')
+    ordering = ('scheduled_at', 'id')
+
+    def get_queryset(self):
+        queryset = SiteVisit.objects.for_business(active_business(self.request)).select_related(
+            'lead', 'assigned_user',
+        )
+        if active_role(self.request) == User.Role.SALESPERSON:
+            queryset = queryset.filter(assigned_user=self.request.user)
+        status_value = self.request.query_params.get('status')
+        if status_value in SiteVisit.Status.values:
+            queryset = queryset.filter(status=status_value)
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return SiteVisitCreateSerializer
+        if self.action == 'reschedule':
+            return SiteVisitRescheduleSerializer
+        return SiteVisitSerializer
+
+    def _locked_visit(self, pk):
+        queryset = SiteVisit.objects.for_business(active_business(self.request))
+        if active_role(self.request) == User.Role.SALESPERSON:
+            queryset = queryset.filter(assigned_user=self.request.user)
+        return get_object_or_404(queryset.select_for_update().select_related('lead', 'assigned_user'), pk=pk)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            lead_queryset = Lead.objects.for_business(active_business(request))
+            if active_role(request) == User.Role.SALESPERSON:
+                lead_queryset = lead_queryset.filter(assigned_user=request.user)
+            lead = get_object_or_404(lead_queryset.select_for_update(), pk=serializer.validated_data['lead'].pk)
+            assigned_user = serializer.validated_data.get('assigned_user', lead.assigned_user)
+            if active_role(request) == User.Role.SALESPERSON:
+                assigned_user = request.user
+            try:
+                visit = schedule_site_visit(
+                    lead=lead,
+                    scheduled_at=serializer.validated_data['scheduled_at'],
+                    address=serializer.validated_data.get('address', ''),
+                    assigned_user=assigned_user,
+                    reminder_enabled=serializer.validated_data['reminder_enabled'],
+                    actor=request.user,
+                )
+            except ValueError as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
+        return Response(
+            SiteVisitSerializer(visit, context=self.get_serializer_context()).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=('post',))
+    def reschedule(self, request, pk=None):
+        with transaction.atomic():
+            visit = self._locked_visit(pk)
+            serializer = self.get_serializer(data=request.data, context={
+                **self.get_serializer_context(),
+                'visit': visit,
+            })
+            serializer.is_valid(raise_exception=True)
+            assigned_user = serializer.validated_data.get('assigned_user', visit.assigned_user)
+            if active_role(request) == User.Role.SALESPERSON:
+                assigned_user = request.user
+            try:
+                visit = reschedule_site_visit(
+                    visit=visit,
+                    scheduled_at=serializer.validated_data['scheduled_at'],
+                    address=serializer.validated_data.get('address', visit.address),
+                    assigned_user=assigned_user,
+                    reminder_enabled=serializer.validated_data.get(
+                        'reminder_enabled', visit.reminder_enabled,
+                    ),
+                    actor=request.user,
+                )
+            except (SiteVisitAlreadyClosedError, ValueError) as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(visit.business_id))
+        return Response(SiteVisitSerializer(visit, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=('post',))
+    def complete(self, request, pk=None):
+        with transaction.atomic():
+            visit = self._locked_visit(pk)
+            try:
+                visit = complete_site_visit(visit=visit, actor=request.user)
+            except SiteVisitAlreadyClosedError as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(visit.business_id))
+        return Response(SiteVisitSerializer(visit, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=('post',))
+    def cancel(self, request, pk=None):
+        with transaction.atomic():
+            visit = self._locked_visit(pk)
+            try:
+                visit = cancel_site_visit(visit=visit, actor=request.user)
+            except SiteVisitAlreadyClosedError as error:
+                raise ValidationError({'detail': str(error)}) from error
+            transaction.on_commit(lambda: invalidate_business_lead_cache(visit.business_id))
+        return Response(SiteVisitSerializer(visit, context=self.get_serializer_context()).data)
 
 
 class LeadViewSet(viewsets.ModelViewSet):
@@ -214,7 +343,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             serializer = LeadTransitionSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
-            lead, _stage_changed = transition_lead(
+            lead, stage_changed = transition_lead(
                 lead=lead,
                 stage=serializer.validated_data['stage'],
                 lost_reason=serializer.validated_data.get('lost_reason', ''),
@@ -222,7 +351,13 @@ class LeadViewSet(viewsets.ModelViewSet):
             )
             transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
 
-        return Response(LeadSerializer(lead, context={'request': request}).data)
+        payload = LeadSerializer(lead, context={'request': request}).data
+        # API clients do not render the lead-detail prompt, so expose the
+        # same non-blocking scheduling cue used by the web stage transition.
+        payload['site_visit_scheduling_recommended'] = bool(
+            stage_changed and lead.stage == Lead.Stage.SITE_VISIT
+        )
+        return Response(payload)
 
     @action(detail=True, methods=('post',), url_path='needs-time')
     def needs_time(self, request, pk=None):

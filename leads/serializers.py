@@ -1,10 +1,13 @@
-from rest_framework import serializers
+from datetime import timedelta
+
 from django.urls import reverse
+from django.utils import timezone
+from rest_framework import serializers
 
 from core.models import User
 from core.tenancy import active_business, active_role, is_active_member_of_business
 
-from .models import Activity, Lead, Product
+from .models import Activity, Lead, Product, SiteVisit
 from .services import record_manual_activity
 
 
@@ -159,3 +162,74 @@ class ActivitySerializer(serializers.ModelSerializer):
             kind=validated_data.get('kind', Activity.Kind.NOTE),
             content=validated_data['content'],
         )
+
+
+class SiteVisitSerializer(serializers.ModelSerializer):
+    """Read-only appointment representation used by the list and actions."""
+
+    lead_name = serializers.CharField(source='lead.customer_name', read_only=True)
+    assigned_user_name = serializers.CharField(source='assigned_user.username', read_only=True)
+
+    class Meta:
+        model = SiteVisit
+        fields = (
+            'id', 'lead', 'lead_name', 'scheduled_at', 'address',
+            'assigned_user', 'assigned_user_name', 'status', 'reminder_enabled',
+            'completed_at', 'cancelled_at', 'created_at', 'updated_at',
+        )
+        read_only_fields = fields
+
+
+class SiteVisitCreateSerializer(serializers.Serializer):
+    lead = serializers.PrimaryKeyRelatedField(queryset=Lead.objects.all())
+    scheduled_at = serializers.DateTimeField()
+    address = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    assigned_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
+    reminder_enabled = serializers.BooleanField(required=False, default=True)
+
+    def validate(self, attrs):
+        request = self.context['request']
+        business = active_business(request)
+        lead = attrs['lead']
+        if lead.business_id != business.id:
+            raise serializers.ValidationError({'lead': 'Select a lead from your business.'})
+        if active_role(request) == User.Role.SALESPERSON and lead.assigned_user_id != request.user.id:
+            raise serializers.ValidationError({'lead': 'You can only schedule visits for your own leads.'})
+
+        assigned_user = attrs.get('assigned_user', lead.assigned_user)
+        if active_role(request) == User.Role.SALESPERSON and assigned_user.id != request.user.id:
+            raise serializers.ValidationError({'assigned_user': 'Salespeople cannot reassign site visits.'})
+        if not is_active_member_of_business(assigned_user, business.id):
+            raise serializers.ValidationError({'assigned_user': 'The visit assignee must be active.'})
+        if attrs['scheduled_at'] <= timezone.now():
+            raise serializers.ValidationError({'scheduled_at': 'Choose a future time for the site visit.'})
+        if attrs['reminder_enabled'] and attrs['scheduled_at'] - timedelta(hours=1) <= timezone.now():
+            raise serializers.ValidationError({
+                'scheduled_at': 'Choose a visit time at least one hour ahead or turn off the reminder.',
+            })
+        return attrs
+
+
+class SiteVisitRescheduleSerializer(serializers.Serializer):
+    scheduled_at = serializers.DateTimeField()
+    address = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    assigned_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
+    reminder_enabled = serializers.BooleanField(required=False)
+
+    def validate(self, attrs):
+        request = self.context['request']
+        visit = self.context['visit']
+        business = active_business(request)
+        assigned_user = attrs.get('assigned_user', visit.assigned_user)
+        reminder_enabled = attrs.get('reminder_enabled', visit.reminder_enabled)
+        if active_role(request) == User.Role.SALESPERSON and assigned_user.id != request.user.id:
+            raise serializers.ValidationError({'assigned_user': 'Salespeople cannot reassign site visits.'})
+        if not is_active_member_of_business(assigned_user, business.id):
+            raise serializers.ValidationError({'assigned_user': 'The visit assignee must be active.'})
+        if attrs['scheduled_at'] <= timezone.now():
+            raise serializers.ValidationError({'scheduled_at': 'Choose a future time for the site visit.'})
+        if reminder_enabled and attrs['scheduled_at'] - timedelta(hours=1) <= timezone.now():
+            raise serializers.ValidationError({
+                'scheduled_at': 'Choose a visit time at least one hour ahead or turn off the reminder.',
+            })
+        return attrs

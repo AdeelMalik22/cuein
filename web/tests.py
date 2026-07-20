@@ -13,10 +13,11 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
+from zoneinfo import ZoneInfo
 
 from core.models import Business, PasswordResetRequest, PendingRegistration, User
 from followups.models import FollowUpTask, Notification
-from leads.models import Activity, Lead, Product
+from leads.models import Activity, Lead, Product, SiteVisit
 from web.views import DashboardView
 
 
@@ -955,3 +956,123 @@ class NotificationWebTests(TestCase):
 
         private_response = self.client.post(reverse('web:notification-read', args=[self.other_notification.id]))
         self.assertEqual(private_response.status_code, 404)
+
+
+class SiteVisitWebTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar', timezone='Asia/Karachi')
+        self.owner = User.objects.create_user(
+            username='visit-owner', password='test-password', business=self.business, role=User.Role.OWNER,
+        )
+        self.salesperson = User.objects.create_user(
+            username='visit-sales', password='test-password', business=self.business, role=User.Role.SALESPERSON,
+        )
+        self.lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Ayesha Visit',
+            phone='03000000000',
+            assigned_user=self.salesperson,
+        )
+        self.manager_lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Manager Visit',
+            phone='03000000001',
+            assigned_user=self.owner,
+        )
+        self.other_business = Business.objects.create(name='Bright CCTV', timezone='Asia/Karachi')
+        self.other_owner = User.objects.create_user(
+            username='other-visit-owner', password='test-password', business=self.other_business, role=User.Role.OWNER,
+        )
+        self.other_lead = Lead.objects.create(
+            business=self.other_business,
+            customer_name='Private Visit',
+            phone='03110000000',
+            assigned_user=self.other_owner,
+        )
+
+    def local_visit_time(self, hours=3):
+        return timezone.localtime(
+            timezone.now() + timedelta(hours=hours),
+            timezone=ZoneInfo(self.business.timezone),
+        ).replace(second=0, microsecond=0)
+
+    def test_site_visit_stage_prompts_for_schedule_and_form_uses_business_time(self):
+        self.client.force_login(self.salesperson)
+        stage_response = self.client.post(
+            reverse('web:lead-stage', args=[self.lead.id]),
+            {'stage': Lead.Stage.SITE_VISIT},
+            follow=True,
+        )
+        scheduled_at = self.local_visit_time()
+        schedule_response = self.client.post(
+            reverse('web:lead-site-visit-create', args=[self.lead.id]),
+            {
+                'scheduled_at': scheduled_at.strftime('%Y-%m-%dT%H:%M'),
+                'address': '14 Solar Road',
+                'reminder_enabled': 'on',
+            },
+        )
+
+        self.assertContains(stage_response, 'APPOINTMENT NEEDED')
+        self.assertContains(stage_response, 'Schedule a site visit')
+        self.assertRedirects(schedule_response, reverse('web:lead-detail', args=[self.lead.id]))
+        visit = SiteVisit.objects.get(lead=self.lead)
+        self.assertEqual(
+            timezone.localtime(visit.scheduled_at, timezone=ZoneInfo(self.business.timezone)),
+            scheduled_at,
+        )
+        self.assertEqual(visit.assigned_user, self.salesperson)
+        self.assertTrue(visit.reminder_enabled)
+        self.assertTrue(Activity.objects.filter(
+            lead=self.lead,
+            kind=Activity.Kind.SITE_VISIT,
+            content='Site visit scheduled.',
+        ).exists())
+
+    def test_salesperson_calendar_shows_only_their_scheduled_visits(self):
+        scheduled_at = self.local_visit_time()
+        SiteVisit.objects.create(
+            business=self.business,
+            lead=self.lead,
+            scheduled_at=scheduled_at,
+            assigned_user=self.salesperson,
+        )
+        SiteVisit.objects.create(
+            business=self.business,
+            lead=self.manager_lead,
+            scheduled_at=scheduled_at,
+            assigned_user=self.owner,
+        )
+        SiteVisit.objects.create(
+            business=self.other_business,
+            lead=self.other_lead,
+            scheduled_at=scheduled_at,
+            assigned_user=self.other_owner,
+        )
+        self.client.force_login(self.salesperson)
+
+        response = self.client.get(
+            reverse('web:site-visit-calendar'),
+            {'view': 'day', 'date': scheduled_at.date().isoformat()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ayesha Visit')
+        self.assertNotContains(response, 'Manager Visit')
+        self.assertNotContains(response, 'Private Visit')
+        self.assertContains(response, 'Calendar view')
+
+    def test_salesperson_cannot_see_a_teammates_visit_on_their_own_lead(self):
+        SiteVisit.objects.create(
+            business=self.business,
+            lead=self.lead,
+            scheduled_at=self.local_visit_time(),
+            address='Manager-only measurement note',
+            assigned_user=self.owner,
+        )
+        self.client.force_login(self.salesperson)
+
+        response = self.client.get(reverse('web:lead-detail', args=[self.lead.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Manager-only measurement note')

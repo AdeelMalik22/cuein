@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.hashers import make_password
@@ -6,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
-from zoneinfo import available_timezones
+from zoneinfo import ZoneInfo, available_timezones
 
 from core.captcha import captcha_enabled, verify_turnstile
 from core.membership_services import update_membership
@@ -14,7 +16,7 @@ from core.models import Business, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
-from leads.models import Activity, Lead, Product
+from leads.models import Activity, Lead, Product, SiteVisit
 
 
 TIMEZONE_REGIONS = (
@@ -43,6 +45,28 @@ TIMEZONE_VALUES = {
     for value, _label in group_choices
 }
 TIMEZONE_VALUES.add('UTC')
+
+
+class BusinessLocalDateTimeField(forms.DateTimeField):
+    """Parse and render a ``datetime-local`` value in one business timezone."""
+
+    def __init__(self, business_timezone, *args, **kwargs):
+        self.business_timezone = ZoneInfo(business_timezone)
+        super().__init__(*args, **kwargs)
+
+    def to_python(self, value):
+        # Django's DateTimeField interprets naive browser input in the active
+        # process timezone. Override it narrowly so appointment times always
+        # mean the active business's local calendar time.
+        with timezone.override(self.business_timezone):
+            return super().to_python(value)
+
+    def prepare_value(self, value):
+        if isinstance(value, datetime):
+            if timezone.is_aware(value):
+                value = timezone.localtime(value, timezone=self.business_timezone)
+            return value.strftime('%Y-%m-%dT%H:%M')
+        return super().prepare_value(value)
 
 
 class ProtectedAuthenticationForm(AuthenticationForm):
@@ -570,6 +594,72 @@ class LeadFollowUpForm(forms.ModelForm):
         if due_at <= timezone.now():
             raise ValidationError('Choose a future time for the next action.')
         return due_at
+
+
+class SiteVisitScheduleForm(forms.ModelForm):
+    """Schedule or reschedule one appointment in the business's local time."""
+
+    class Meta:
+        model = SiteVisit
+        fields = ('scheduled_at', 'address', 'assigned_user', 'reminder_enabled')
+        widgets = {
+            'address': forms.Textarea(attrs={
+                'rows': 2,
+                'placeholder': 'Optional address, landmark, or access note',
+            }),
+        }
+
+    def __init__(self, *args, business, user, role=None, lead=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.business = business
+        self.user = user
+        self.role = role or user.role
+        self.lead = lead or getattr(self.instance, 'lead', None)
+        scheduled_initial = self.initial.get('scheduled_at')
+        if not scheduled_initial and self.instance and self.instance.pk:
+            scheduled_initial = self.instance.scheduled_at
+        self.fields['scheduled_at'] = BusinessLocalDateTimeField(
+            business.timezone,
+            label='Date and time',
+            widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+        )
+        if scheduled_initial:
+            self.initial['scheduled_at'] = scheduled_initial
+
+        assignees = users_for_business(business).order_by('first_name', 'last_name', 'username')
+        if self.role == User.Role.SALESPERSON:
+            self.fields.pop('assigned_user')
+        else:
+            self.fields['assigned_user'].queryset = assignees
+            default_assignee = (
+                self.instance.assigned_user_id
+                if self.instance and self.instance.pk
+                else getattr(self.lead, 'assigned_user_id', None)
+            )
+            if default_assignee and assignees.filter(pk=default_assignee).exists():
+                self.initial.setdefault('assigned_user', default_assignee)
+
+        self.fields['reminder_enabled'].label = 'Create a reminder task one hour before'
+        self.fields['reminder_enabled'].required = False
+        if not self.instance or not self.instance.pk:
+            self.initial.setdefault('reminder_enabled', True)
+
+    def clean_scheduled_at(self):
+        scheduled_at = self.cleaned_data['scheduled_at']
+        if scheduled_at <= timezone.now():
+            raise ValidationError('Choose a future time for the site visit.')
+        return scheduled_at
+
+    def clean(self):
+        cleaned_data = super().clean()
+        scheduled_at = cleaned_data.get('scheduled_at')
+        reminder_enabled = cleaned_data.get('reminder_enabled', False)
+        if scheduled_at and reminder_enabled and scheduled_at - timedelta(hours=1) <= timezone.now():
+            self.add_error(
+                'scheduled_at',
+                'Choose a visit time at least one hour ahead or turn off the reminder.',
+            )
+        return cleaned_data
 
 
 class TaskCompletionForm(forms.Form):

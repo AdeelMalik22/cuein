@@ -10,8 +10,9 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.models import Business, User
+from followups.models import FollowUpTask
 
-from .models import Activity, Lead, Product
+from .models import Activity, Lead, Product, SiteVisit
 
 
 TEST_CACHES = {
@@ -267,6 +268,212 @@ class LeadApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.lead.refresh_from_db()
         self.assertEqual(self.lead.assigned_user, self.owner)
+
+
+class SiteVisitApiTests(APITestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.other_business = Business.objects.create(name='Bright CCTV')
+        self.owner = User.objects.create_user(
+            username='visit-owner', password='test-password', business=self.business, role=User.Role.OWNER,
+        )
+        self.salesperson = User.objects.create_user(
+            username='visit-sales', password='test-password', business=self.business, role=User.Role.SALESPERSON,
+        )
+        self.other_owner = User.objects.create_user(
+            username='visit-other', password='test-password', business=self.other_business, role=User.Role.OWNER,
+        )
+        self.lead = Lead.objects.create(
+            business=self.business,
+            customer_name='Ayesha Site',
+            phone='03000000000',
+            assigned_user=self.salesperson,
+        )
+        self.other_lead = Lead.objects.create(
+            business=self.other_business,
+            customer_name='Private Site',
+            phone='03110000000',
+            assigned_user=self.other_owner,
+        )
+
+    def create_visit(self, **overrides):
+        values = {
+            'business': self.business,
+            'lead': self.lead,
+            'scheduled_at': timezone.now() + timedelta(hours=3),
+            'address': '14 Solar Road',
+            'assigned_user': self.salesperson,
+            'reminder_enabled': True,
+        }
+        values.update(overrides)
+        return SiteVisit.objects.create(**values)
+
+    def test_api_creates_visit_activity_and_one_hour_reminder(self):
+        scheduled_at = timezone.now() + timedelta(hours=3)
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.post(
+            reverse('site-visit-list'),
+            {
+                'lead': str(self.lead.id),
+                'scheduled_at': scheduled_at.isoformat(),
+                'address': '14 Solar Road',
+                'assigned_user': str(self.salesperson.id),
+                'reminder_enabled': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        visit = SiteVisit.objects.get(pk=response.data['id'])
+        self.assertEqual(visit.business, self.business)
+        self.assertEqual(visit.assigned_user, self.salesperson)
+        self.assertTrue(Activity.objects.filter(
+            business=self.business,
+            lead=self.lead,
+            kind=Activity.Kind.SITE_VISIT,
+            content='Site visit scheduled.',
+            metadata__site_visit_id=str(visit.id),
+        ).exists())
+        reminder = FollowUpTask.objects.get(
+            business=self.business,
+            lead=self.lead,
+            rule_key=f'site_visit_reminder:{visit.id}',
+        )
+        self.assertEqual(reminder.assigned_user, self.salesperson)
+        self.assertEqual(reminder.due_at, scheduled_at - timedelta(hours=1))
+
+    def test_transition_to_site_visit_returns_a_non_blocking_schedule_prompt(self):
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.post(
+            reverse('lead-transition', args=[self.lead.id]),
+            {'stage': Lead.Stage.SITE_VISIT},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['stage'], Lead.Stage.SITE_VISIT)
+        self.assertTrue(response.data['site_visit_scheduling_recommended'])
+        self.assertEqual(SiteVisit.objects.filter(lead=self.lead).count(), 0)
+
+    def test_salesperson_cannot_see_or_schedule_another_persons_visit(self):
+        manager_visit = SiteVisit.objects.create(
+            business=self.business,
+            lead=self.lead,
+            scheduled_at=timezone.now() + timedelta(hours=3),
+            assigned_user=self.owner,
+        )
+        self.client.force_authenticate(self.salesperson)
+
+        list_response = self.client.get(reverse('site-visit-list'))
+        detail_response = self.client.get(reverse('site-visit-detail', args=[manager_visit.id]))
+        create_response = self.client.post(
+            reverse('site-visit-list'),
+            {
+                'lead': str(self.lead.id),
+                'scheduled_at': (timezone.now() + timedelta(hours=3)).isoformat(),
+                'assigned_user': str(self.owner.id),
+            },
+            format='json',
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list_response.data['count'], 0)
+        self.assertEqual(detail_response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(create_response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('assigned_user', create_response.data)
+
+    def test_complete_cancels_the_reminder_and_records_activity(self):
+        visit = self.create_visit()
+        reminder = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=visit.scheduled_at - timedelta(hours=1),
+            description='Site visit reminder for Ayesha Site.',
+            rule_key=f'site_visit_reminder:{visit.id}',
+        )
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.post(reverse('site-visit-complete', args=[visit.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        visit.refresh_from_db()
+        reminder.refresh_from_db()
+        self.assertEqual(visit.status, SiteVisit.Status.COMPLETED)
+        self.assertIsNotNone(visit.completed_at)
+        self.assertEqual(reminder.status, FollowUpTask.Status.CANCELLED)
+        self.assertTrue(Activity.objects.filter(
+            lead=self.lead,
+            kind=Activity.Kind.SITE_VISIT,
+            content='Site visit completed.',
+            metadata__site_visit_id=str(visit.id),
+        ).exists())
+
+    def test_cancel_records_a_distinct_activity_and_resolves_its_reminder(self):
+        visit = self.create_visit()
+        reminder = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=visit.scheduled_at - timedelta(hours=1),
+            description='Site visit reminder for Ayesha Site.',
+            rule_key=f'site_visit_reminder:{visit.id}',
+        )
+        self.client.force_authenticate(self.salesperson)
+
+        response = self.client.post(reverse('site-visit-cancel', args=[visit.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        visit.refresh_from_db()
+        reminder.refresh_from_db()
+        self.assertEqual(visit.status, SiteVisit.Status.CANCELLED)
+        self.assertIsNotNone(visit.cancelled_at)
+        self.assertEqual(reminder.status, FollowUpTask.Status.CANCELLED)
+        self.assertTrue(Activity.objects.filter(
+            lead=self.lead,
+            kind=Activity.Kind.SITE_VISIT,
+            content='Site visit cancelled.',
+            metadata__site_visit_id=str(visit.id),
+        ).exists())
+
+    def test_reschedule_updates_the_existing_reminder_without_duplication(self):
+        visit = self.create_visit()
+        original_due_at = visit.scheduled_at - timedelta(hours=1)
+        reminder = FollowUpTask.objects.create(
+            business=self.business,
+            lead=self.lead,
+            assigned_user=self.salesperson,
+            due_at=original_due_at,
+            description='Site visit reminder for Ayesha Site.',
+            rule_key=f'site_visit_reminder:{visit.id}',
+        )
+        new_time = timezone.now() + timedelta(days=2, hours=2)
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.post(
+            reverse('site-visit-reschedule', args=[visit.id]),
+            {
+                'scheduled_at': new_time.isoformat(),
+                'address': '22 Measurement Lane',
+                'reminder_enabled': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        visit.refresh_from_db()
+        reminder.refresh_from_db()
+        self.assertEqual(visit.scheduled_at, new_time)
+        self.assertEqual(visit.address, '22 Measurement Lane')
+        self.assertEqual(reminder.due_at, new_time - timedelta(hours=1))
+        self.assertEqual(FollowUpTask.objects.filter(
+            business=self.business,
+            lead=self.lead,
+            rule_key=f'site_visit_reminder:{visit.id}',
+            status__in=(FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE),
+        ).count(), 1)
 
 
 @override_settings(CACHES=TEST_CACHES)

@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -48,8 +48,18 @@ from core.timezones import business_day_bounds
 from followups.models import FollowUpTask, Notification
 from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
 from leads.cache import invalidate_business_lead_cache
-from leads.models import Activity, Lead, Product
-from leads.services import record_lead_capture, record_manual_activity, record_needs_time, transition_lead
+from leads.models import Activity, Lead, Product, SiteVisit
+from leads.services import (
+    SiteVisitAlreadyClosedError,
+    cancel_site_visit,
+    complete_site_visit,
+    record_lead_capture,
+    record_manual_activity,
+    record_needs_time,
+    reschedule_site_visit,
+    schedule_site_visit,
+    transition_lead,
+)
 
 from .forms import (
     ActivityForm,
@@ -67,6 +77,7 @@ from .forms import (
     PasswordResetRequestForm,
     ProtectedAuthenticationForm,
     SignupForm,
+    SiteVisitScheduleForm,
     TaskCompletionForm,
     TaskRescheduleForm,
     TeamUserForm,
@@ -317,11 +328,20 @@ class TenantWebMixin(LoginRequiredMixin):
             queryset = queryset.filter(assigned_user=self.request.user)
         return queryset
 
+    def visible_site_visits(self):
+        queryset = SiteVisit.objects.for_business(self.get_business()).select_related('lead', 'assigned_user')
+        if self.get_role() == User.Role.SALESPERSON:
+            queryset = queryset.filter(assigned_user=self.request.user)
+        return queryset
+
     def get_visible_lead(self, pk):
         return get_object_or_404(self.visible_leads(), pk=pk)
 
     def get_visible_task(self, pk):
         return get_object_or_404(self.visible_tasks(), pk=pk)
+
+    def get_visible_site_visit(self, pk):
+        return get_object_or_404(self.visible_site_visits(), pk=pk)
 
     def common_context(self):
         membership = self.get_active_membership()
@@ -883,6 +903,29 @@ class LeadDetailView(TenantWebMixin, TemplateView):
             lead=lead,
             status__in=(FollowUpTask.Status.PENDING, FollowUpTask.Status.OVERDUE),
         ).select_related('assigned_user').order_by('due_at')
+        # Keep the appointment history subject to the same role scope as the
+        # calendar and lifecycle endpoints. A salesperson may own the lead
+        # while a manager has scheduled a separate visit for another teammate.
+        site_visits = list(
+            self.visible_site_visits().filter(lead=lead).order_by('-scheduled_at', '-id'),
+        )
+        for visit in site_visits:
+            visit.local_scheduled_at = timezone.localtime(
+                visit.scheduled_at,
+                timezone=ZoneInfo(self.get_business().timezone),
+            )
+            visit.local_scheduled_iso = visit.local_scheduled_at.isoformat()
+            visit.scheduled_display = visit.local_scheduled_at.strftime(
+                '%a, %b %d · %I:%M %p',
+            ).replace(' 0', ' ')
+            if visit.status == SiteVisit.Status.SCHEDULED:
+                visit.reschedule_form = SiteVisitScheduleForm(
+                    instance=visit,
+                    business=self.get_business(),
+                    user=self.request.user,
+                    role=self.get_role(),
+                    lead=lead,
+                )
         context.update(self.common_context())
         context.update({
             'lead': lead,
@@ -895,6 +938,16 @@ class LeadDetailView(TenantWebMixin, TemplateView):
             'stage_form': LeadStageForm(initial={'stage': lead.stage}),
             'activity_form': ActivityForm(initial={'kind': Activity.Kind.CALL}),
             'follow_up_form': LeadFollowUpForm(),
+            'site_visit_form': SiteVisitScheduleForm(
+                business=self.get_business(),
+                user=self.request.user,
+                role=self.get_role(),
+                lead=lead,
+            ),
+            'site_visits': site_visits,
+            'has_scheduled_site_visit': any(
+                visit.status == SiteVisit.Status.SCHEDULED for visit in site_visits
+            ),
             'open_tasks': task_queryset,
             'timeline': Activity.objects.for_business(self.get_business()).filter(lead=lead).select_related('created_by'),
             'can_change_assignee': self.is_manager(),
@@ -942,7 +995,7 @@ class LeadStageUpdateView(TenantWebMixin, View):
             if self.get_role() == User.Role.SALESPERSON and locked_lead.assigned_user_id != request.user.id:
                 return HttpResponseForbidden('You can only update your own leads.')
 
-            transition_lead(
+            _lead, stage_changed = transition_lead(
                 lead=locked_lead,
                 stage=next_stage,
                 lost_reason=form.cleaned_data.get('lost_reason', ''),
@@ -956,7 +1009,13 @@ class LeadStageUpdateView(TenantWebMixin, View):
                 'stage': next_stage,
                 'stage_label': Lead.Stage(next_stage).label,
                 'detail_url': request.build_absolute_uri(redirect('web:lead-detail', pk=lead.pk).url),
+                'site_visit_scheduling_recommended': bool(
+                    stage_changed and next_stage == Lead.Stage.SITE_VISIT
+                ),
             })
+        if stage_changed and next_stage == Lead.Stage.SITE_VISIT:
+            messages.success(request, 'Lead moved to Site visit. Add the appointment details below when you have them.')
+            return redirect('web:lead-detail', pk=lead.pk)
         messages.success(request, f'Lead moved to {Lead.Stage(next_stage).label}.')
         return redirect('web:lead-detail', pk=lead.pk)
 
@@ -1008,6 +1067,211 @@ class LeadFollowUpCreateView(TenantWebMixin, View):
         else:
             messages.error(request, 'Choose a future time and describe the next action.')
         return redirect('web:lead-detail', pk=lead.pk)
+
+
+class LeadSiteVisitCreateView(TenantWebMixin, View):
+    """Schedule another tenant-scoped appointment from a lead detail page."""
+
+    def post(self, request, pk):
+        lead = self.get_visible_lead(pk)
+        form = SiteVisitScheduleForm(
+            request.POST,
+            business=self.get_business(),
+            user=request.user,
+            role=self.get_role(),
+            lead=lead,
+        )
+        if not form.is_valid():
+            messages.error(request, 'Check the visit time and details, then try again.')
+            return redirect('web:lead-detail', pk=lead.pk)
+
+        with transaction.atomic():
+            locked_lead = Lead.objects.for_business(self.get_business()).select_for_update().get(pk=lead.pk)
+            if self.get_role() == User.Role.SALESPERSON and locked_lead.assigned_user_id != request.user.id:
+                return HttpResponseForbidden('You can only schedule visits for your own leads.')
+            assigned_user = form.cleaned_data.get('assigned_user') or locked_lead.assigned_user
+            if self.get_role() == User.Role.SALESPERSON:
+                assigned_user = request.user
+            try:
+                schedule_site_visit(
+                    lead=locked_lead,
+                    scheduled_at=form.cleaned_data['scheduled_at'],
+                    address=form.cleaned_data.get('address', ''),
+                    assigned_user=assigned_user,
+                    reminder_enabled=form.cleaned_data.get('reminder_enabled', False),
+                    actor=request.user,
+                )
+            except ValueError as error:
+                transaction.set_rollback(True)
+                messages.error(request, str(error))
+                return redirect('web:lead-detail', pk=lead.pk)
+            transaction.on_commit(lambda: invalidate_business_lead_cache(locked_lead.business_id))
+        messages.success(request, 'Site visit scheduled.')
+        return redirect('web:lead-detail', pk=lead.pk)
+
+
+class SiteVisitRescheduleView(TenantWebMixin, View):
+    def post(self, request, pk):
+        visit = self.get_visible_site_visit(pk)
+        fallback = redirect('web:lead-detail', pk=visit.lead_id).url
+        form = SiteVisitScheduleForm(
+            request.POST,
+            instance=visit,
+            business=self.get_business(),
+            user=request.user,
+            role=self.get_role(),
+            lead=visit.lead,
+        )
+        if not form.is_valid():
+            messages.error(request, 'Check the new visit time and details, then try again.')
+            return redirect(safe_post_redirect(request, fallback))
+
+        with transaction.atomic():
+            queryset = SiteVisit.objects.for_business(self.get_business())
+            if self.get_role() == User.Role.SALESPERSON:
+                queryset = queryset.filter(assigned_user=request.user)
+            locked_visit = get_object_or_404(queryset.select_for_update().select_related('lead', 'assigned_user'), pk=visit.pk)
+            assigned_user = form.cleaned_data.get('assigned_user') or locked_visit.assigned_user
+            if self.get_role() == User.Role.SALESPERSON:
+                assigned_user = request.user
+            try:
+                reschedule_site_visit(
+                    visit=locked_visit,
+                    scheduled_at=form.cleaned_data['scheduled_at'],
+                    address=form.cleaned_data.get('address', ''),
+                    assigned_user=assigned_user,
+                    reminder_enabled=form.cleaned_data.get('reminder_enabled', False),
+                    actor=request.user,
+                )
+            except (SiteVisitAlreadyClosedError, ValueError) as error:
+                transaction.set_rollback(True)
+                messages.error(request, str(error))
+                return redirect(safe_post_redirect(request, fallback))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(locked_visit.business_id))
+        messages.success(request, 'Site visit rescheduled.')
+        return redirect(safe_post_redirect(request, fallback))
+
+
+class SiteVisitCompleteView(TenantWebMixin, View):
+    def post(self, request, pk):
+        visit = self.get_visible_site_visit(pk)
+        with transaction.atomic():
+            queryset = SiteVisit.objects.for_business(self.get_business())
+            if self.get_role() == User.Role.SALESPERSON:
+                queryset = queryset.filter(assigned_user=request.user)
+            locked_visit = get_object_or_404(queryset.select_for_update().select_related('lead'), pk=visit.pk)
+            try:
+                complete_site_visit(visit=locked_visit, actor=request.user)
+            except SiteVisitAlreadyClosedError as error:
+                messages.error(request, str(error))
+                return redirect(safe_post_redirect(request, 'web:site-visit-calendar'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(locked_visit.business_id))
+        messages.success(request, 'Site visit marked completed.')
+        return redirect(safe_post_redirect(request, 'web:site-visit-calendar'))
+
+
+class SiteVisitCancelView(TenantWebMixin, View):
+    def post(self, request, pk):
+        visit = self.get_visible_site_visit(pk)
+        with transaction.atomic():
+            queryset = SiteVisit.objects.for_business(self.get_business())
+            if self.get_role() == User.Role.SALESPERSON:
+                queryset = queryset.filter(assigned_user=request.user)
+            locked_visit = get_object_or_404(queryset.select_for_update().select_related('lead'), pk=visit.pk)
+            try:
+                cancel_site_visit(visit=locked_visit, actor=request.user)
+            except SiteVisitAlreadyClosedError as error:
+                messages.error(request, str(error))
+                return redirect(safe_post_redirect(request, 'web:site-visit-calendar'))
+            transaction.on_commit(lambda: invalidate_business_lead_cache(locked_visit.business_id))
+        messages.success(request, 'Site visit cancelled.')
+        return redirect(safe_post_redirect(request, 'web:site-visit-calendar'))
+
+
+class SiteVisitCalendarView(TenantWebMixin, TemplateView):
+    """A compact day/week appointment calendar for the active workspace."""
+
+    template_name = 'web/site_visit_calendar.html'
+
+    def selected_date(self, business_timezone):
+        raw_date = self.request.GET.get('date', '')
+        if raw_date:
+            try:
+                return date.fromisoformat(raw_date)
+            except ValueError:
+                pass
+        return timezone.localtime(timezone.now(), timezone=business_timezone).date()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        business = self.get_business()
+        business_timezone = ZoneInfo(business.timezone)
+        selected_view = self.request.GET.get('view', 'day')
+        if selected_view not in {'day', 'week'}:
+            selected_view = 'day'
+        selected_date = self.selected_date(business_timezone)
+        if selected_view == 'week':
+            period_start = selected_date - timedelta(days=selected_date.weekday())
+            period_days = 7
+        else:
+            period_start = selected_date
+            period_days = 1
+        period_end = period_start + timedelta(days=period_days)
+        range_start = timezone.make_aware(
+            datetime.combine(period_start, time.min),
+            timezone=business_timezone,
+        )
+        range_end = timezone.make_aware(
+            datetime.combine(period_end, time.min),
+            timezone=business_timezone,
+        )
+        visits = self.visible_site_visits().filter(
+            status=SiteVisit.Status.SCHEDULED,
+            scheduled_at__gte=range_start,
+            scheduled_at__lt=range_end,
+        ).order_by('scheduled_at', 'id')
+        visits_by_day = {period_start + timedelta(days=offset): [] for offset in range(period_days)}
+        for visit in visits:
+            local_scheduled_at = timezone.localtime(visit.scheduled_at, timezone=business_timezone)
+            visit.local_scheduled_at = local_scheduled_at
+            visit.local_scheduled_iso = local_scheduled_at.isoformat()
+            visit.time_label = local_scheduled_at.strftime('%I:%M %p').lstrip('0')
+            visits_by_day[local_scheduled_at.date()].append(visit)
+
+        today = timezone.localtime(timezone.now(), timezone=business_timezone).date()
+        calendar_days = [
+            {
+                'date': current_date,
+                'label': current_date.strftime('%A'),
+                'short_label': current_date.strftime('%a'),
+                'date_label': current_date.strftime('%b %d').replace(' 0', ' '),
+                'is_today': current_date == today,
+                'visits': visits_by_day[current_date],
+            }
+            for current_date in (period_start + timedelta(days=offset) for offset in range(period_days))
+        ]
+        previous_date = period_start - timedelta(days=period_days)
+        next_date = period_start + timedelta(days=period_days)
+        current_date_query = urlencode({'view': selected_view, 'date': today.isoformat()})
+        context.update(self.common_context())
+        context.update({
+            'selected_view': selected_view,
+            'calendar_anchor_date': selected_date.isoformat(),
+            'calendar_days': calendar_days,
+            'calendar_title': (
+                period_start.strftime('%B %d, %Y').replace(' 0', ' ')
+                if selected_view == 'day'
+                else (
+                    f"{period_start.strftime('%b %d').replace(' 0', ' ')}"
+                    f" – {(period_end - timedelta(days=1)).strftime('%b %d, %Y').replace(' 0', ' ')}"
+                )
+            ),
+            'calendar_previous_query': urlencode({'view': selected_view, 'date': previous_date.isoformat()}),
+            'calendar_next_query': urlencode({'view': selected_view, 'date': next_date.isoformat()}),
+            'calendar_today_query': current_date_query,
+            'scheduled_visit_count': sum(len(day['visits']) for day in calendar_days),
+        })
+        return context
 
 
 class TaskListView(TenantWebMixin, ListView):
