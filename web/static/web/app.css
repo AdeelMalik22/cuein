@@ -6653,6 +6653,17 @@ body.task-queue-page .task-page-summary i {
     padding: .7rem .8rem;
 }
 
+.site-visit-assignee-note {
+    color: var(--muted);
+    font-size: .68rem;
+    line-height: 1.45;
+    margin: 0;
+}
+
+.site-visit-assignee-note strong {
+    color: var(--ink);
+}
+
 .lead-site-visit-list {
     display: grid;
 }

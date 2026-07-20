@@ -609,12 +609,22 @@ class SiteVisitScheduleForm(forms.ModelForm):
             }),
         }
 
-    def __init__(self, *args, business, user, role=None, lead=None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        business,
+        user,
+        role=None,
+        lead=None,
+        allow_assignee_change=True,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.business = business
         self.user = user
         self.role = role or user.role
         self.lead = lead or getattr(self.instance, 'lead', None)
+        self.allow_assignee_change = allow_assignee_change
         scheduled_initial = self.initial.get('scheduled_at')
         if not scheduled_initial and self.instance and self.instance.pk:
             scheduled_initial = self.instance.scheduled_at
@@ -627,7 +637,7 @@ class SiteVisitScheduleForm(forms.ModelForm):
             self.initial['scheduled_at'] = scheduled_initial
 
         assignees = users_for_business(business).order_by('first_name', 'last_name', 'username')
-        if self.role == User.Role.SALESPERSON:
+        if self.role == User.Role.SALESPERSON or not self.allow_assignee_change:
             self.fields.pop('assigned_user')
         else:
             self.fields['assigned_user'].queryset = assignees
@@ -636,8 +646,12 @@ class SiteVisitScheduleForm(forms.ModelForm):
                 if self.instance and self.instance.pk
                 else getattr(self.lead, 'assigned_user_id', None)
             )
-            if default_assignee and assignees.filter(pk=default_assignee).exists():
-                self.initial.setdefault('assigned_user', default_assignee)
+            if (
+                default_assignee
+                and not self.initial.get('assigned_user')
+                and assignees.filter(pk=default_assignee).exists()
+            ):
+                self.initial['assigned_user'] = default_assignee
 
         self.fields['reminder_enabled'].label = 'Create a reminder task one hour before'
         self.fields['reminder_enabled'].required = False

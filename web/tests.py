@@ -1029,6 +1029,28 @@ class SiteVisitWebTests(TestCase):
             content='Site visit scheduled.',
         ).exists())
 
+    def test_new_visit_inherits_the_lead_owner_without_showing_an_assignee_picker(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse('web:lead-detail', args=[self.lead.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('assigned_user', response.context['site_visit_form'].fields)
+        self.assertContains(response, 'the lead owner')
+
+        scheduled_at = self.local_visit_time()
+        schedule_response = self.client.post(
+            reverse('web:lead-site-visit-create', args=[self.lead.id]),
+            {
+                'scheduled_at': scheduled_at.strftime('%Y-%m-%dT%H:%M'),
+                'address': '',
+                'reminder_enabled': 'on',
+            },
+        )
+
+        self.assertRedirects(schedule_response, reverse('web:lead-detail', args=[self.lead.id]))
+        self.assertEqual(SiteVisit.objects.get(lead=self.lead).assigned_user, self.salesperson)
+
     def test_salesperson_calendar_shows_only_their_scheduled_visits(self):
         scheduled_at = self.local_visit_time()
         SiteVisit.objects.create(

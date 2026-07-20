@@ -112,6 +112,7 @@
         <details class="schedule-site-visit" {% if lead.stage == 'site_visit' and not has_scheduled_site_visit %}open{% endif %}>
           <summary>Schedule a site visit <span aria-hidden="true">+</span></summary>
           <form method="post" action="{% url 'web:lead-site-visit-create' lead.pk %}" class="inline-form">{% csrf_token %}
+            <p class="site-visit-assignee-note">Assigned to <strong>{{ lead.assigned_user.get_full_name|default:lead.assigned_user.username }}</strong>, the lead owner.</p>
             {% for field in site_visit_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}
             <button class="button button-dark" type="submit">Schedule visit</button>
           </form>

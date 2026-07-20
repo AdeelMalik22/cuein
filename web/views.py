@@ -943,6 +943,7 @@ class LeadDetailView(TenantWebMixin, TemplateView):
                 user=self.request.user,
                 role=self.get_role(),
                 lead=lead,
+                allow_assignee_change=False,
             ),
             'site_visits': site_visits,
             'has_scheduled_site_visit': any(
@@ -1080,6 +1081,7 @@ class LeadSiteVisitCreateView(TenantWebMixin, View):
             user=request.user,
             role=self.get_role(),
             lead=lead,
+            allow_assignee_change=False,
         )
         if not form.is_valid():
             messages.error(request, 'Check the visit time and details, then try again.')
