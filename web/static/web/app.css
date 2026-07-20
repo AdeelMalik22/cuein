@@ -1965,6 +1965,11 @@ input::placeholder, textarea::placeholder {
     gap: .85rem;
 }
 
+.lead-workflow-panels {
+    display: grid;
+    gap: .85rem;
+}
+
 .activity-form {
     align-items: end;
     display: grid;
