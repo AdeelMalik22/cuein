@@ -55,6 +55,61 @@
           {% empty %}<div class="empty-state">The history starts when you add the first note.</div>{% endfor %}
         </div>
       </article>
+
+      <section class="lead-workflow-panels" aria-label="Lead next actions">
+        <article class="panel site-visits-panel {% if lead.stage == 'site_visit' and not has_scheduled_site_visit %}needs-site-visit{% endif %}">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">{% if lead.stage == 'site_visit' and not has_scheduled_site_visit %}APPOINTMENT NEEDED{% else %}ON-SITE WORK{% endif %}</p>
+              <h2>Site visits</h2>
+            </div>
+            <a class="text-button" href="{% url 'web:site-visit-calendar' %}">Calendar</a>
+          </div>
+          {% if lead.stage == 'site_visit' and not has_scheduled_site_visit %}
+            <p class="site-visit-prompt">This lead is ready for a site visit. Add the date, time, and address when the appointment is agreed.</p>
+          {% endif %}
+          <div class="lead-site-visit-list">
+            {% for visit in site_visits %}
+              <article class="lead-site-visit {% if visit.status != 'scheduled' %}is-closed{% endif %}">
+                <div class="lead-site-visit-top">
+                  <div><strong><time datetime="{{ visit.local_scheduled_iso }}">{{ visit.scheduled_display }}</time></strong>{% if visit.address %}<small>{{ visit.address }}</small>{% endif %}</div>
+                  <span class="visit-status visit-status-{{ visit.status }}">{{ visit.get_status_display }}</span>
+                </div>
+                <small class="lead-site-visit-assignee">{% if is_manager %}{{ visit.assigned_user.get_full_name|default:visit.assigned_user.username }}{% else %}Assigned to you{% endif %}{% if visit.reminder_enabled %} · Reminder one hour before{% endif %}</small>
+                {% if visit.status == 'scheduled' %}
+                  <div class="lead-site-visit-actions">
+                    <form method="post" action="{% url 'web:site-visit-complete' visit.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="text-button" type="submit">Complete</button></form>
+                    <form method="post" action="{% url 'web:site-visit-cancel' visit.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="text-button text-button-danger" type="submit">Cancel</button></form>
+                    <details class="reschedule-site-visit"><summary class="text-button">Reschedule</summary>
+                      <form method="post" action="{% url 'web:site-visit-reschedule' visit.pk %}" class="inline-form">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">{% for field in visit.reschedule_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}<button class="button button-muted" type="submit">Save visit</button></form>
+                    </details>
+                  </div>
+                {% endif %}
+              </article>
+            {% empty %}
+              <p class="compact-empty">No site visits scheduled yet.</p>
+            {% endfor %}
+          </div>
+          {% if lead.stage == 'site_visit' %}
+            <details class="schedule-site-visit" {% if not has_scheduled_site_visit %}open{% endif %}>
+              <summary>Schedule a site visit <span aria-hidden="true">+</span></summary>
+              <form method="post" action="{% url 'web:lead-site-visit-create' lead.pk %}" class="inline-form">{% csrf_token %}
+                <p class="site-visit-assignee-note">Assigned to <strong>{{ lead.assigned_user.get_full_name|default:lead.assigned_user.username }}</strong>, the lead owner.</p>
+                {% for field in site_visit_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>{% endfor %}
+                <button class="button button-dark" type="submit">Schedule visit</button>
+              </form>
+            </details>
+          {% endif %}
+        </article>
+
+        <article class="panel lead-tasks-panel">
+          <div class="panel-heading"><div><p class="eyebrow">NEXT ACTIONS</p><h2>Follow-ups</h2></div><span class="task-count">{{ open_tasks|length }}</span></div>
+          <div class="lead-task-list">
+            {% for task in open_tasks %}<a href="{% url 'web:task-list' %}" class="lead-task {% if task.status == 'overdue' %}is-overdue{% endif %}"><span class="status-dot {% if task.status == 'overdue' %}is-overdue{% endif %}"></span><span><strong>{{ task.description }}</strong><small>{% if task.status == 'overdue' %}Overdue · {% endif %}{{ task.due_at|date:'D, M j · g:i A' }}</small></span></a>{% empty %}<div class="empty-state compact-empty"><p>No open follow-up yet.</p></div>{% endfor %}
+          </div>
+          <details class="schedule-follow-up"><summary>Schedule a follow-up <span aria-hidden="true">+</span></summary><form method="post" action="{% url 'web:lead-follow-up-create' lead.pk %}" class="inline-form">{% csrf_token %}{% for field in follow_up_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}</label>{% endfor %}<button class="button button-dark" type="submit">Schedule it</button></form></details>
+        </article>
+      </section>
     </div>
 
     <aside class="lead-detail-sidebar">
@@ -76,13 +131,6 @@
         </form>
       </article>
 
-      <article class="panel lead-tasks-panel">
-        <div class="panel-heading"><div><p class="eyebrow">NEXT ACTIONS</p><h2>Follow-ups</h2></div><span class="task-count">{{ open_tasks|length }}</span></div>
-        <div class="lead-task-list">
-          {% for task in open_tasks %}<a href="{% url 'web:task-list' %}" class="lead-task {% if task.status == 'overdue' %}is-overdue{% endif %}"><span class="status-dot {% if task.status == 'overdue' %}is-overdue{% endif %}"></span><span><strong>{{ task.description }}</strong><small>{% if task.status == 'overdue' %}Overdue · {% endif %}{{ task.due_at|date:'D, M j · g:i A' }}</small></span></a>{% empty %}<div class="empty-state compact-empty"><p>No open follow-up yet.</p></div>{% endfor %}
-        </div>
-        <details class="schedule-follow-up"><summary>Schedule a follow-up <span aria-hidden="true">+</span></summary><form method="post" action="{% url 'web:lead-follow-up-create' lead.pk %}" class="inline-form">{% csrf_token %}{% for field in follow_up_form %}<label class="field"><span>{{ field.label }}</span>{{ field }}</label>{% endfor %}<button class="button button-dark" type="submit">Schedule it</button></form></details>
-      </article>
     </aside>
   </section>
 {% endblock %}

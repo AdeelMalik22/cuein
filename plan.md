@@ -13,6 +13,7 @@ The first releasable MVP includes:
 - Tenant signup/bootstrap, JWT login, and team management.
 - Fixed seven-stage pipeline; lead capture, assignment, and safe stage changes.
 - An append-only lead timeline and a manually created or automated next-action task.
+- Repeatable scheduled site visits with an optional one-hour reminder task and a role-scoped calendar.
 - A salesperson work queue and an owner/manager dashboard.
 - Three automations: quotation follow-up, delayed follow-up, warranty reminder; plus stale-lead and overdue-task sweeps.
 - Strict tenant isolation and role-based visibility.
@@ -100,6 +101,7 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 | `Membership` | user, business, role, is_active, joined_at | Unique `(user, business)` link. A user can have different roles in different workspaces. |
 | `Product` | business, name, description, is_active | Unique name per business. |
 | `Lead` | business, customer_name, phone, email, source, product, stage, quoted_price, assigned_user, lost_reason, created_at, updated_at, last_activity_at, closed_at | `lost_reason` required for Lost; `closed_at` set for Won/Lost. `last_activity_at` is denormalized for efficient stale checks. |
+| `SiteVisit` | business, lead, scheduled_at, address, assigned_user, status, reminder_enabled, completed_at, cancelled_at | Repeatable appointment record. `status`: scheduled, completed, cancelled; lifecycle changes write a lead Activity. |
 | `Activity` | business, lead, type, content, metadata, created_by, created_at | Append-only. `metadata` stores structured stage data such as `{from, to}`. |
 | `FollowUpTask` | business, lead, assigned_user, due_at, description, status, rule_key, created_at, completed_at | `status`: pending, done, overdue, cancelled. `rule_key` supports idempotency. |
 | `Notification` | business, recipient, task, read_at, created_at | Recipient-scoped in-app feed; create for overdue tasks and resolve it when the task is actioned. |
@@ -110,6 +112,7 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 
 - `Lead`: `(business, stage)`, `(business, assigned_user, last_activity_at)`, `(business, created_at)`.
 - `FollowUpTask`: `(business, assigned_user, due_at, status)`, `(business, lead, status)`.
+- `SiteVisit`: `(business, status, scheduled_at)`, `(business, assigned_user, scheduled_at)`, `(business, lead, scheduled_at)`.
 - `Activity`: `(business, lead, created_at)`.
 - `Product`: unique `(business, name)`.
 - `Membership`: unique `(user, business)`, plus indexes for `(user, is_active)` and `(business, is_active)`.
@@ -143,6 +146,7 @@ Implementation requirements:
 - Before scheduling a stale escalation, exclude terminal stages and leads that already have an open stale-escalation task.
 - Store datetimes in UTC. Render them in each user/business timezone (start with an explicit `Business.timezone`, default `Asia/Karachi`). Define “today” using that timezone, and validate the timezone consistently in models, forms, and APIs.
 - Periodic sweeps must be safe to run multiple times. Test task creation under retry and concurrent-worker conditions.
+- A visit reminder is optional and uses a deterministic `site_visit_reminder:{visit_id}` task rule key. It is due one hour before the appointment; rescheduling moves the open reminder, while completing/cancelling the visit resolves it.
 
 ## 6. API Contract (MVP)
 
@@ -155,6 +159,7 @@ Use `/api/v1/`; paginate lists; return ISO-8601 UTC timestamps. List endpoints a
 | Products | `GET/POST /products`, `PATCH /products/{id}` |
 | Leads | `GET/POST /leads`, `GET/PATCH /leads/{id}`, `POST /leads/{id}/transition`, `POST /leads/{id}/needs-time`, `GET /leads/{id}/timeline` |
 | Activities | `POST /leads/{id}/activities` |
+| Site visits | `GET/POST /site-visits`, `GET /site-visits/{id}`, `POST /site-visits/{id}/reschedule`, `POST /site-visits/{id}/complete`, `POST /site-visits/{id}/cancel` |
 | Tasks | `GET /follow-up-tasks?due=today&status=pending`, `POST /follow-up-tasks`, `PATCH /follow-up-tasks/{id}` (ordinary edits/reassignment), `POST /follow-up-tasks/{id}/complete`, `POST /follow-up-tasks/{id}/reschedule`, `DELETE /follow-up-tasks/{id}` (cancel) |
 | Notifications | `GET /notifications`, `GET /notifications/{id}`, `POST /notifications/{id}/read` |
 | Dashboard | `GET /dashboard/summary` |
@@ -171,10 +176,11 @@ Deliver screens in workflow order:
 1. Login and initial business/team setup.
 2. “My day” task queue: due, overdue, complete, reschedule, and quick activity logging.
 3. Notifications: All/Unread filters, a readable overdue-task summary, and a navigation unread badge.
-4. Lead quick-add and lead detail, with timeline and next-action status prominent.
-5. Pipeline board: desktop drag/drop; mobile stage selector; assignment and basic filters.
-6. Owner/manager dashboard: due/overdue, pipeline value, stalled leads, salesperson summary.
-7. Reports with accessible tables first; charts only where they improve scanning.
+4. Site visits: schedule one or more appointments from a lead; show a business-timezone day/week calendar with role-scoped visibility.
+5. Lead quick-add and lead detail, with timeline and next-action status prominent.
+6. Pipeline board: desktop drag/drop; mobile stage selector; assignment and basic filters.
+7. Owner/manager dashboard: due/overdue, pipeline value, stalled leads, salesperson summary.
+8. Reports with accessible tables first; charts only where they improve scanning.
 
 Use optimistic UI only for reversible actions; refetch/rollback on failure. Never assume a role from client state—the API response is authoritative. Include loading, empty, error, and no-permission states for each primary screen.
 
@@ -201,6 +207,7 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 
 - Product, Lead, Activity, assignment, and stage-transition APIs are implemented with tenant validation.
 - The web workspace includes quick-add, lead detail/editing, activity logging, follow-up creation, and a responsive Kanban board with desktop drag-and-drop. Owner/manager assignee choices use profile photos with a fallback avatar and include native radio controls, so selection works with or without JavaScript.
+- `SiteVisit` supports multiple appointments per lead, optional address and one-hour reminder, transactional complete/cancel history, and a role-scoped day/week calendar. Moving a lead to Site visit prompts scheduling but does not force an appointment.
 - Dashboard/task views surface active leads without open next actions.
 
 **Exit:** a salesperson can create and progress a lead end-to-end, see a complete timeline, and cannot access a colleague’s lead; manager can reassign it.
@@ -243,6 +250,7 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 | P0 | Transition validation, Lost reason, one timeline event per transition, transaction rollback behavior. |
 | P0 | Automation idempotency, retries, timezone boundaries, stale/overdue sweeps, and recipient-scoped notifications. |
 | P0 | Task complete/reschedule/cancel locking, notification resolution, and rollback behavior. |
+| P0 | Site-visit tenant isolation, salesperson assignment visibility, reminder idempotency, lifecycle Activity records, and business-timezone calendar boundaries. |
 | P1 | Profile-picture storage, health/readiness responses, request-ID propagation, and notification-page layout/read-state behavior. |
 | P1 | Dashboard/report aggregate correctness and pagination/filter behavior. |
 | P1 | Browser tests for quick-add → transition → task completion on mobile viewport. |
@@ -272,6 +280,7 @@ Focused checks currently cover media storage, notification layout and scoping, h
 3. Cross-business reporting, combined dashboards, and data transfers. Multiple business access is implemented, but each workspace remains isolated by design.
 4. Industry-specific fields, warranty durations, and lead sources.
 5. Retention/deletion policy and regional compliance requirements before broad commercial launch.
+6. Google/Outlook calendar sync, route optimization, and customer appointment confirmation; these are intentionally separate from the v1 scheduling workflow.
 
 ## 12. Progress so far
 
@@ -285,3 +294,4 @@ Focused checks currently cover media storage, notification layout and scoping, h
 - `Smith LLC` has a reusable 2,000-record demo dataset for realistic dashboard, leads, and follow-up testing.
 - The notification centre, business-timezone due-date calculation, active-membership stale reminders, transactional task actions, and case-insensitive account/product validation are implemented.
 - Static/media storage, environment-driven production hosts, Gunicorn, WhiteNoise, Compose, health/readiness probes, and request-ID-aware logs are configured.
+- Repeatable site-visit scheduling, optional reminder tasks, activity lifecycle history, and role-scoped day/week calendar views are implemented.
