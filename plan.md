@@ -1,8 +1,8 @@
 # Implementation Plan — Cuein Follow-Up Lead Management
 
 **Companion to:** `PRD-FollowUpCRM.md`  
-**Status:** Active implementation — core MVP workflows are built; hardening and pilot readiness remain.
-**Last updated:** July 15, 2026
+**Status:** Active implementation — core MVP workflows and the deployment baseline are built; operational verification and pilot readiness remain.
+**Last updated:** July 20, 2026
 
 ## 1. Delivery Goal and MVP Boundary
 
@@ -17,7 +17,7 @@ The first releasable MVP includes:
 - Three automations: quotation follow-up, delayed follow-up, warranty reminder; plus stale-lead and overdue-task sweeps.
 - Strict tenant isolation and role-based visibility.
 
-Explicitly defer configurable stages, configurable automation rules, WhatsApp/SMS, quotation PDFs, email delivery, native apps, and AI insights. In-app tasks are the notification channel for MVP.
+Explicitly defer configurable stages, configurable automation rules, WhatsApp/SMS, quotation PDFs, email delivery, native apps, and AI insights. In-app task notifications are the notification channel for MVP.
 
 ### MVP acceptance criteria
 
@@ -34,12 +34,13 @@ Explicitly defer configurable stages, configurable automation rules, WhatsApp/SM
 | --- | --- | --- |
 | Backend | Django + Django REST Framework | Admin, auth, ORM and validation suit a CRUD-heavy SaaS. |
 | Database | PostgreSQL in every environment except isolated unit tests | Required for production-like constraints, indexes, and aggregates. |
-| Async | Celery + Redis + Celery Beat | Separates immediate event scheduling from time-based sweeps. |
+| Async | Celery + Redis or Valkey + Celery Beat | Separates immediate event scheduling from time-based sweeps; Valkey uses the Redis protocol. |
 | Frontend | Django templates + shared CSS + progressive JavaScript | Keeps the workflow fast to build, mobile-responsive, and close to Django’s auth/forms. |
 | API auth | Django sessions for the web workspace; `djangorestframework-simplejwt` for the API | The workspace uses normal Django authentication while integrations use JWT. |
 | Tenant model | Shared schema, `business_id` on every tenant-owned table | Appropriate operational complexity for SMB SaaS. |
 | User model | Global custom Django `User` plus a `Membership` join model | One login can access several businesses; role and active status live on each membership. `User.business`/`User.role` remain a temporary migration bridge, not authorization state. |
-| Notifications | In-app task feed only | Keeps MVP focused; email/WhatsApp becomes an adapter, not a prerequisite. |
+| Notifications | In-app notification centre for overdue tasks | Keeps MVP focused; email/WhatsApp becomes an adapter, not a prerequisite. |
+| Deployment | Gunicorn, WhiteNoise, environment configuration, and Docker Compose | Provides a production-ready baseline without changing the server-rendered architecture. |
 
 Use `followups` as the Django app name rather than `tasks`, which is easily confused with Celery task modules and Python task concepts.
 
@@ -55,6 +56,11 @@ Browser  →  Django web views/templates
                         └── Celery Beat → workers (daily/hourly sweeps)
 ```
 
+Production runs Django through Gunicorn behind a TLS-terminating proxy. WhiteNoise
+serves collected static assets; uploaded media is served by the deployment's
+proxy or object storage. Docker Compose supplies PostgreSQL, Valkey, web,
+worker, and Beat configuration for a single-host deployment.
+
 ### Tenant scoping
 
 - `Business` is the tenant root. All tenant-owned models carry a non-null `business` FK.
@@ -67,6 +73,8 @@ Browser  →  Django web views/templates
 - Do **not** use a request/thread-local "current tenant" manager. It is fragile in admin, scripts, async work, and tests. Use explicit `.for_business(business)` querysets and consistently scoped ViewSet methods.
 - Serializers validate that every related object (product, assignee, lead) belongs to the resolved active business; new assignees must have an active membership there.
 - Celery tasks accept primitive IDs, then fetch with both primary key and `business_id`. Periodic tasks iterate businesses explicitly.
+- Stale-lead escalations choose an active owner or manager membership from the business being swept. They must not use a legacy `User.business`/`User.role` value to choose a recipient.
+- Only an owner can make owner-level membership changes. Updates, deactivation, and removal must lock that workspace's membership rows in a transaction so concurrent requests cannot leave it without an active owner.
 - The Django admin must scope tenant-owned querysets and foreign-key choices to the admin user's business, or be restricted to a superuser-only internal console.
 
 ### Roles
@@ -87,14 +95,14 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 
 | Model | Important fields | Constraints / notes |
 | --- | --- | --- |
-| `Business` | name, industry, is_active, created_at | Tenant root. |
+| `Business` | name, industry, timezone, is_active, created_at | Tenant root; timezone is a validated IANA value used for business-local due-date boundaries. |
 | `User` | username, password, email, phone, profile_picture, is_active | Global custom `AbstractUser` identity. Legacy `business` and `role` fields remain only as a safe rollout bridge. |
 | `Membership` | user, business, role, is_active, joined_at | Unique `(user, business)` link. A user can have different roles in different workspaces. |
 | `Product` | business, name, description, is_active | Unique name per business. |
 | `Lead` | business, customer_name, phone, email, source, product, stage, quoted_price, assigned_user, lost_reason, created_at, updated_at, last_activity_at, closed_at | `lost_reason` required for Lost; `closed_at` set for Won/Lost. `last_activity_at` is denormalized for efficient stale checks. |
 | `Activity` | business, lead, type, content, metadata, created_by, created_at | Append-only. `metadata` stores structured stage data such as `{from, to}`. |
 | `FollowUpTask` | business, lead, assigned_user, due_at, description, status, rule_key, created_at, completed_at | `status`: pending, done, overdue, cancelled. `rule_key` supports idempotency. |
-| `Notification` | business, recipient, task, read_at, created_at | MVP in-app feed; create when a task is due/overdue, not as a transport abstraction yet. |
+| `Notification` | business, recipient, task, read_at, created_at | Recipient-scoped in-app feed; create for overdue tasks and resolve it when the task is actioned. |
 
 `FollowUpRule` is not a model in MVP. Keep default offsets in one versioned Python module (`followups/rules.py`) and record its stable `rule_key` on generated tasks. Add per-business configuration only after pilots validate the defaults.
 
@@ -105,6 +113,7 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 - `Activity`: `(business, lead, created_at)`.
 - `Product`: unique `(business, name)`.
 - `Membership`: unique `(user, business)`, plus indexes for `(user, is_active)` and `(business, is_active)`.
+- `User` and pending registration username/email values are case-insensitively unique; product names are case-insensitively unique within a business.
 - Partial unique constraint for automated tasks: one non-terminal task per `(business, lead, rule_key)`. If the database/version makes the exact conditional constraint awkward, enforce with a transaction and document it; PostgreSQL partial uniqueness is preferred.
 - Check constraints for non-negative quoted price and a valid `closed_at`/terminal stage relationship where practical. Keep the conditional Lost reason validation in the serializer/model `clean()` as it is text-based.
 
@@ -115,6 +124,7 @@ Keep role checks in named DRF permission classes and queryset filters, not only 
 - In one `transaction.atomic()` block: lock the lead, validate the transition, update the lead, create one stage activity, update `last_activity_at`, and register automation work with `transaction.on_commit()`.
 - Use `on_commit()` rather than a `post_save` signal. Signals cannot reliably determine the previous stage and may enqueue work for rolled-back transactions.
 - Logging a call, note, site visit, or quotation activity updates `last_activity_at`. A system-generated reminder does not count as customer activity.
+- Complete, reschedule, and cancel actions lock the open task and use shared service code inside one transaction to change task state, resolve its notification, and write the timeline activity. Completion also creates the successor task in that same transaction.
 
 ## 5. Automation Design
 
@@ -131,7 +141,7 @@ Implementation requirements:
 - The synchronous API transaction enqueues a small Celery task after commit. The worker creates the task through an idempotent service function.
 - A completed/cancelled task is terminal. Completing a task should prompt for either a logged outcome or a newly scheduled next action; the API must still flag the lead when none exists.
 - Before scheduling a stale escalation, exclude terminal stages and leads that already have an open stale-escalation task.
-- Store datetimes in UTC. Render them in each user/business timezone (start with an explicit `Business.timezone`, default `Asia/Karachi`). Define “today” using that timezone.
+- Store datetimes in UTC. Render them in each user/business timezone (start with an explicit `Business.timezone`, default `Asia/Karachi`). Define “today” using that timezone, and validate the timezone consistently in models, forms, and APIs.
 - Periodic sweeps must be safe to run multiple times. Test task creation under retry and concurrent-worker conditions.
 
 ## 6. API Contract (MVP)
@@ -145,7 +155,8 @@ Use `/api/v1/`; paginate lists; return ISO-8601 UTC timestamps. List endpoints a
 | Products | `GET/POST /products`, `PATCH /products/{id}` |
 | Leads | `GET/POST /leads`, `GET/PATCH /leads/{id}`, `POST /leads/{id}/transition`, `POST /leads/{id}/needs-time`, `GET /leads/{id}/timeline` |
 | Activities | `POST /leads/{id}/activities` |
-| Tasks | `GET /follow-up-tasks?due=today&status=pending`, `POST /follow-up-tasks`, `PATCH /follow-up-tasks/{id}` (complete, reschedule, reassign) |
+| Tasks | `GET /follow-up-tasks?due=today&status=pending`, `POST /follow-up-tasks`, `PATCH /follow-up-tasks/{id}` (ordinary edits/reassignment), `POST /follow-up-tasks/{id}/complete`, `POST /follow-up-tasks/{id}/reschedule`, `DELETE /follow-up-tasks/{id}` (cancel) |
+| Notifications | `GET /notifications`, `GET /notifications/{id}`, `POST /notifications/{id}/read` |
 | Dashboard | `GET /dashboard/summary` |
 | Reports | `GET /reports/conversion-by-source`, `.../by-salesperson`, `.../time-to-close`, `.../lost-reasons` |
 
@@ -159,21 +170,23 @@ Deliver screens in workflow order:
 
 1. Login and initial business/team setup.
 2. “My day” task queue: due, overdue, complete, reschedule, and quick activity logging.
-3. Lead quick-add and lead detail, with timeline and next-action status prominent.
-4. Pipeline board: desktop drag/drop; mobile stage selector; assignment and basic filters.
-5. Owner/manager dashboard: due/overdue, pipeline value, stalled leads, salesperson summary.
-6. Reports with accessible tables first; charts only where they improve scanning.
+3. Notifications: All/Unread filters, a readable overdue-task summary, and a navigation unread badge.
+4. Lead quick-add and lead detail, with timeline and next-action status prominent.
+5. Pipeline board: desktop drag/drop; mobile stage selector; assignment and basic filters.
+6. Owner/manager dashboard: due/overdue, pipeline value, stalled leads, salesperson summary.
+7. Reports with accessible tables first; charts only where they improve scanning.
 
 Use optimistic UI only for reversible actions; refetch/rollback on failure. Never assume a role from client state—the API response is authoritative. Include loading, empty, error, and no-permission states for each primary screen.
 
 ## 8. Build Order, Status, and Next Steps
 
-### Phase 0 — Project foundation — substantially complete
+### Phase 0 — Project foundation — complete baseline; CI remains
 
-- Implemented: PostgreSQL configuration, custom `User`, `Business`, membership-scoped JWT/session authentication, role permissions, and tenant isolation test fixtures.
-- Remaining: Docker Compose, health/readiness endpoints, `.env.example`, structured logging, and CI for formatting, migration checks, and tests.
+- Implemented: PostgreSQL configuration, custom `User`, `Business`, membership-scoped JWT/session authentication, role permissions, tenant isolation fixtures, `.env.example`, health/readiness endpoints, request-ID-aware logging, and Docker Compose.
+- Static assets collect to `staticfiles/` and are served by WhiteNoise; uploaded profile pictures use a configured local media backend in development. Production hosts come from `DJANGO_ALLOWED_HOSTS`, and Gunicorn is included for deployment.
+- Remaining: CI for formatting, migration checks, and the full test suite, plus live-environment verification of the deployment configuration.
 
-**Exit:** a user can authenticate; every tenant-scoped list/detail request is demonstrably isolated; CI, readiness checks, and deployment configuration are in place.
+**Exit:** a user can authenticate; every tenant-scoped list/detail request is demonstrably isolated; CI, readiness checks, and deployment configuration are in place and verified in a real deployment.
 
 ### Phase 0.5 — Multi-business workspaces — complete
 
@@ -192,11 +205,12 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 
 **Exit:** a salesperson can create and progress a lead end-to-end, see a complete timeline, and cannot access a colleague’s lead; manager can reassign it.
 
-### Phase 2 — Follow-up engine — implemented; operational hardening remains
+### Phase 2 — Follow-up engine — implemented; operational verification remains
 
 - `FollowUpTask`, `Notification`, rule constants, idempotent scheduling, Celery task wrappers, overdue marking, and stale-lead escalation are implemented.
-- The web task queue supports complete and reschedule workflows; APIs preserve a new next action on task completion.
-- Remaining: production worker/Beat deployment verification, frozen-time/timezone coverage, and a user-facing notification feed in the web workspace.
+- The web task queue supports complete and reschedule workflows; APIs preserve a new next action on task completion. Complete, reschedule, and cancellation paths are transactionally coupled to their timeline and notification updates.
+- The web notification centre and API are recipient- and tenant-scoped, expose read/unread state, and show an unread navigation badge. Due-today task filtering uses each business's validated timezone.
+- Remaining: production worker/Beat deployment verification and expanded frozen-time/timezone coverage.
 
 **Exit:** all automation rules are verified under normal/retried execution and periodic sweeps have frozen-time/timezone coverage.
 
@@ -212,7 +226,8 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 
 - Implemented: onboarding, aggregate reports, admin configuration, and targeted demo data for `Smith LLC`.
 - The Smith LLC seed creates 2,000 idempotent demo leads plus activities and a mix of upcoming, overdue, completed, and cancelled follow-ups.
-- Remaining: audit-focused admin review, error monitoring, deployment runbook, and usability testing with pilot businesses.
+- The deployment baseline now includes Gunicorn, WhiteNoise, Compose, environment-driven host configuration, health/readiness probes, and request-ID-aware logs. This configuration has not itself been proven by a production deployment.
+- Remaining: audit-focused admin review, error monitoring, a full deployment/rollback runbook, and usability testing with pilot businesses.
 
 **Exit:** first business can create a tenant, add a team member, and log its first lead in under 15 minutes without developer help.
 
@@ -224,21 +239,29 @@ Use optimistic UI only for reversible actions; refetch/rollback on failure. Neve
 | P0 | Role visibility and reassignment rules. |
 | P0 | Multi-membership workspace switching, rejected workspace selection, business-scoped JWT issuance, and access-token membership revalidation. |
 | P0 | Assignment accepts only an active member of the current business; rendered assignee choices include a real submitted form control. |
+| P0 | Membership changes cannot remove the final active owner under concurrent requests; stale escalation recipients are active members of the correct business. |
 | P0 | Transition validation, Lost reason, one timeline event per transition, transaction rollback behavior. |
-| P0 | Automation idempotency, retries, timezone boundaries, stale/overdue sweeps. |
+| P0 | Automation idempotency, retries, timezone boundaries, stale/overdue sweeps, and recipient-scoped notifications. |
+| P0 | Task complete/reschedule/cancel locking, notification resolution, and rollback behavior. |
+| P1 | Profile-picture storage, health/readiness responses, request-ID propagation, and notification-page layout/read-state behavior. |
 | P1 | Dashboard/report aggregate correctness and pagination/filter behavior. |
 | P1 | Browser tests for quick-add → transition → task completion on mobile viewport. |
 | P2 | Load tests for daily sweeps and dashboard with representative tenant data. |
 
 Use factories that always require an explicit business. Do not create unscoped tenant models in tests. Test API behavior rather than only managers so the actual security boundary is covered.
 
+Focused checks currently cover media storage, notification layout and scoping, health/readiness, and request-ID/logging behavior. Broader CI and production-service verification remain release work.
+
 ## 10. Operations, Privacy, and Release Readiness
 
 - Secrets come only from environment/secret management; never commit `.env` files or JWT keys.
 - Deploy membership changes with `manage.py migrate`; `manage.py backfill_memberships` is an idempotent safety check for legacy users.
 - Back up PostgreSQL daily and test a restore before pilot. Redis is disposable broker state, not the system of record.
-- Enable TLS, secure cookies where applicable, allowed-host/CORS configuration, rate limits on login, and production error monitoring.
-- Log request ID, user ID, business ID, and action outcome without storing notes/phone numbers in logs. Treat lead data as customer personal data.
+- Enable TLS, secure cookies where applicable, allowed-host/CORS configuration, rate limits on login, and production error monitoring. Configure hosts through `DJANGO_ALLOWED_HOSTS`, never a source-controlled deployment-specific list.
+- WhiteNoise serves collected static files. Serve uploaded media through the reverse proxy or object storage in production; the local `media/` backend is for development.
+- `GET /healthz/` is process liveness; `GET /readyz/` checks PostgreSQL and Redis/Valkey and returns `503` while either dependency is unavailable.
+- Each response includes `X-Request-ID`; production defaults to JSON logging with that ID. Log request ID, user ID, business ID, and action outcome without storing notes/phone numbers. Treat lead data as customer personal data.
+- Compose keeps PostgreSQL and Valkey private to its network, publishes Gunicorn only to `127.0.0.1:8000`, and coordinates migration/static collection before web, worker, and Beat start.
 - Add a minimal audit record for assignment, stage, and task-status changes. The Activity timeline is product history, not a complete security audit trail.
 - Publish a deployment runbook: migrate, collect static assets, start web/worker/beat, smoke-test login and scheduled jobs, and rollback procedure.
 
@@ -260,3 +283,5 @@ Use factories that always require an explicit business. Do not create unscoped t
 - A user can hold multiple business memberships, switch the validated active workspace, and receive a business-scoped JWT; owners can create another business from the switcher.
 - Profile photos and fallback-avatar assignment controls are available in the web workspace.
 - `Smith LLC` has a reusable 2,000-record demo dataset for realistic dashboard, leads, and follow-up testing.
+- The notification centre, business-timezone due-date calculation, active-membership stale reminders, transactional task actions, and case-insensitive account/product validation are implemented.
+- Static/media storage, environment-driven production hosts, Gunicorn, WhiteNoise, Compose, health/readiness probes, and request-ID-aware logs are configured.
