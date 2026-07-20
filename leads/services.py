@@ -253,9 +253,19 @@ def _sync_site_visit_reminder(*, visit, now):
     return task
 
 
-def _validate_new_site_visit(*, lead, scheduled_at, assigned_user, reminder_enabled, now):
+def _validate_new_site_visit(
+    *,
+    lead,
+    scheduled_at,
+    assigned_user,
+    reminder_enabled,
+    now,
+    require_site_visit_stage=False,
+):
     if lead.stage in (Lead.Stage.WON, Lead.Stage.LOST):
         raise ValueError('Closed leads cannot receive a site visit.')
+    if require_site_visit_stage and lead.stage != Lead.Stage.SITE_VISIT:
+        raise ValueError('Move the lead to Site visit before scheduling an appointment.')
     if scheduled_at <= now:
         raise ValueError('Choose a future time for the site visit.')
     if not is_active_member_of_business(assigned_user, lead.business_id):
@@ -276,6 +286,7 @@ def schedule_site_visit(*, lead, scheduled_at, address, assigned_user, reminder_
         assigned_user=assigned_user,
         reminder_enabled=reminder_enabled,
         now=now,
+        require_site_visit_stage=True,
     )
     visit = SiteVisit.objects.create(
         business=lead.business,

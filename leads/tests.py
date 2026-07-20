@@ -309,6 +309,8 @@ class SiteVisitApiTests(APITestCase):
         return SiteVisit.objects.create(**values)
 
     def test_api_creates_visit_activity_and_one_hour_reminder(self):
+        self.lead.stage = Lead.Stage.SITE_VISIT
+        self.lead.save()
         scheduled_at = timezone.now() + timedelta(hours=3)
         self.client.force_authenticate(self.owner)
 
@@ -343,6 +345,25 @@ class SiteVisitApiTests(APITestCase):
         self.assertEqual(reminder.assigned_user, self.salesperson)
         self.assertEqual(reminder.due_at, scheduled_at - timedelta(hours=1))
 
+    def test_api_rejects_scheduling_before_the_site_visit_stage(self):
+        self.lead.stage = Lead.Stage.CONTACTED
+        self.lead.save()
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.post(
+            reverse('site-visit-list'),
+            {
+                'lead': str(self.lead.id),
+                'scheduled_at': (timezone.now() + timedelta(hours=3)).isoformat(),
+                'reminder_enabled': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('lead', response.data)
+        self.assertEqual(SiteVisit.objects.filter(lead=self.lead).count(), 0)
+
     def test_transition_to_site_visit_returns_a_non_blocking_schedule_prompt(self):
         self.client.force_authenticate(self.salesperson)
 
@@ -358,6 +379,8 @@ class SiteVisitApiTests(APITestCase):
         self.assertEqual(SiteVisit.objects.filter(lead=self.lead).count(), 0)
 
     def test_salesperson_cannot_see_or_schedule_another_persons_visit(self):
+        self.lead.stage = Lead.Stage.SITE_VISIT
+        self.lead.save()
         manager_visit = SiteVisit.objects.create(
             business=self.business,
             lead=self.lead,

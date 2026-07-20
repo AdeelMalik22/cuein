@@ -1030,6 +1030,8 @@ class SiteVisitWebTests(TestCase):
         ).exists())
 
     def test_new_visit_inherits_the_lead_owner_without_showing_an_assignee_picker(self):
+        self.lead.stage = Lead.Stage.SITE_VISIT
+        self.lead.save()
         self.client.force_login(self.owner)
 
         response = self.client.get(reverse('web:lead-detail', args=[self.lead.id]))
@@ -1050,6 +1052,32 @@ class SiteVisitWebTests(TestCase):
 
         self.assertRedirects(schedule_response, reverse('web:lead-detail', args=[self.lead.id]))
         self.assertEqual(SiteVisit.objects.get(lead=self.lead).assigned_user, self.salesperson)
+
+    def test_contacted_lead_does_not_offer_or_create_a_site_visit(self):
+        self.lead.stage = Lead.Stage.CONTACTED
+        self.lead.save()
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse('web:lead-detail', args=[self.lead.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Schedule a site visit')
+
+        schedule_response = self.client.post(
+            reverse('web:lead-site-visit-create', args=[self.lead.id]),
+            {
+                'scheduled_at': self.local_visit_time().strftime('%Y-%m-%dT%H:%M'),
+                'address': '',
+                'reminder_enabled': 'on',
+            },
+            follow=True,
+        )
+
+        self.assertContains(
+            schedule_response,
+            'Move the lead to Site visit before scheduling an appointment.',
+        )
+        self.assertEqual(SiteVisit.objects.filter(lead=self.lead).count(), 0)
 
     def test_salesperson_calendar_shows_only_their_scheduled_visits(self):
         scheduled_at = self.local_visit_time()

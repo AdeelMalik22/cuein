@@ -195,6 +195,10 @@ class SiteVisitCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError({'lead': 'Select a lead from your business.'})
         if active_role(request) == User.Role.SALESPERSON and lead.assigned_user_id != request.user.id:
             raise serializers.ValidationError({'lead': 'You can only schedule visits for your own leads.'})
+        if lead.stage != Lead.Stage.SITE_VISIT:
+            raise serializers.ValidationError({
+                'lead': 'Move the lead to Site visit before scheduling an appointment.',
+            })
 
         assigned_user = attrs.get('assigned_user', lead.assigned_user)
         if active_role(request) == User.Role.SALESPERSON and assigned_user.id != request.user.id:
