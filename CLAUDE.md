@@ -22,7 +22,7 @@ The project is a Django multi-tenant application with both a server-rendered web
 ```text
 cuein/          Django settings, Celery configuration, and root URLs
 core/           Business tenant, custom User, auth/team APIs, permissions
-leads/          Product, Lead, Activity models and tenant-scoped APIs
+leads/          Product, Lead, SiteVisit, Activity models and tenant-scoped APIs
 followups/      Follow-up tasks, notifications, rules, services, Celery tasks
 web/            Server-rendered workspace views, templates, CSS, and JS
 compose.yaml    Single-host PostgreSQL, Valkey, Gunicorn, Celery worker, and Beat configuration
@@ -58,6 +58,7 @@ The local PostgreSQL connection values belong in the root `.env` file. Do not co
 - Never accept a client-provided `business_id` from an API body, query string, URL, or mutable header as the tenant source. It is permitted only when requesting a token or switching a workspace, and must be validated against the authenticated user's active memberships server-side.
 - Scope API and web querysets from the resolved active business, for example `Lead.objects.for_business(active_business(request))`.
 - A newly assigned lead/task user must be an active member of the current business. Historical records may retain a removed member for audit/history.
+- `SiteVisit` is tenant-owned and must be scoped exactly like leads and tasks. Salespeople can view and action only their assigned visits; owners and managers can view all visits in the active business.
 - Stale-lead reminders must select an active owner or manager membership in the target business; never select a recipient from the legacy user fields or another workspace.
 - Only a workspace owner can change owner-level membership details. Membership role, activation, and removal operations must lock the relevant workspace memberships inside a transaction so concurrent requests cannot remove the final active owner.
 - Cross-tenant detail lookups must return `404`; never leak object existence.
@@ -78,6 +79,7 @@ Roles are membership-scoped. Never use a global user role for an active-workspac
 - A workspace switcher that shows the active business; owners can create and enter another business from it.
 - Lead quick-add with a photo-and-name assignee dropdown, fallback avatar, editable detail view, activity timeline, search/filtering, stage changes, and a drag-and-drop Kanban board.
 - Follow-up list with due, overdue, complete, reschedule, and cancellation workflows.
+- Site-visit scheduling on a lead, with optional address and one-hour reminder task, lifecycle history, and role-scoped day/week calendar views.
 - Notification centre for overdue follow-ups, with All/Unread filters, read state, and an unread navigation badge.
 - Owner/manager dashboard with task attention, pipeline value, team pulse, stage distribution, source conversion, and win-rate analytics.
 - Reports for conversion by source/salesperson, time to close by service, and lost reasons.
@@ -90,6 +92,7 @@ Roles are membership-scoped. Never use a global user role for an active-workspac
 - Lists are paginated, and filtering/search/ordering stay server-side.
 - Use dedicated actions for workflow changes, such as `POST /api/v1/leads/{id}/transition/`, `POST /api/v1/leads/{id}/needs-time/`, and task complete/reschedule actions; do not hide state transitions in generic PATCH behavior.
 - Notifications are recipient- and tenant-scoped: use `GET /api/v1/notifications/` and `POST /api/v1/notifications/{id}/read/`. A normal list endpoint must never reveal another person's alert.
+- Site visits use `/api/v1/site-visits/` with dedicated `reschedule`, `complete`, and `cancel` actions. Do not encode visit lifecycle changes in a generic PATCH.
 
 ## Follow-ups, time, and notifications
 
@@ -97,6 +100,8 @@ Roles are membership-scoped. Never use a global user role for an active-workspac
 - Use the shared lead-activity and follow-up service functions so timeline events stay consistent and are always written with the task or lead's business.
 - Complete, reschedule, and cancel actions must lock the selected open task and run its status change, notification resolution, successor task creation where applicable, and activity record in one `transaction.atomic()` block.
 - Resolve outstanding notifications when their task is completed, rescheduled, or cancelled. Keep notification pages and APIs recipient-scoped as well as business-scoped.
+- A scheduled site visit may create one optional `FollowUpTask` due one hour before the appointment. Use its deterministic per-visit rule key so reschedules move the existing reminder and visit completion/cancellation resolves it.
+- Site visits can repeat for one lead. Their schedule, assignee, and status belong on `SiteVisit`, not mutable fields on `Lead`; completion and cancellation must create an `Activity` entry in the same transaction.
 
 ## Production and observability rules
 
@@ -128,6 +133,7 @@ Roles are membership-scoped. Never use a global user role for an active-workspac
 - The lead workflow, seven-stage board, activity timeline, task workflows, and role-aware web workspace are implemented.
 - Celery task wrappers, idempotent follow-up scheduling, overdue marking, active-membership stale-lead escalation, and notification creation are implemented.
 - The notification page/API, unread navigation badge, business-timezone due-date filtering, and transactional complete/reschedule/cancel workflows are implemented.
+- Site visits support repeatable appointments, free-text location, optional one-hour reminders, Activity history, tenant/role-scoped APIs, and responsive day/week calendar views.
 - Dashboard/reporting views now include operational metrics plus pipeline and source-conversion analytics.
 - The workspace includes membership-scoped switching, owner business creation, profile photos, and a functional fallback-avatar assignee picker alongside responsive navigation and a targeted, idempotent Smith LLC demo-data seed.
 - Production baseline configuration includes media/static storage, environment-driven allowed hosts, WhiteNoise, Gunicorn, Compose, health/readiness probes, and request-ID-aware logging.

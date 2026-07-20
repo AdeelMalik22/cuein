@@ -5,9 +5,9 @@ from .views import (
     BusinessCreateView, BusinessSettingsView, DashboardView, EmailVerificationResendView, EmailVerificationSentView,
     EmailVerificationView, LandingView, LeadActivityCreateView, LeadCreateView,
     LeadDetailView, LeadFollowUpCreateView, LeadListView, LeadNeedsTimeView, LeadStageListView, LeadStageUpdateView,
-    LeadUpdateView, NotificationListView, NotificationReadView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ProfileView, ProtectedLoginView, ReportsView,
+    LeadSiteVisitCreateView, LeadUpdateView, NotificationListView, NotificationReadView, OnboardingView, ProductDeleteView, ProductEditView, ProductListView, ProfileView, ProtectedLoginView, ReportsView,
     PasswordResetConfirmView, PasswordResetRequestView, ProfilePasswordChangeView, SecuritySettingsView,
-    SignupView, TaskCompleteView, TaskListView, TaskRescheduleView, TeamDeleteView, TeamEditView,
+    SignupView, SiteVisitCalendarView, SiteVisitCancelView, SiteVisitCompleteView, SiteVisitRescheduleView, TaskCompleteView, TaskListView, TaskRescheduleView, TeamDeleteView, TeamEditView,
     TeamListView, WorkspaceSwitchView,
 )
 
@@ -36,6 +36,11 @@ urlpatterns = [
     path('leads/<uuid:pk>/needs-time/', LeadNeedsTimeView.as_view(), name='lead-needs-time'),
     path('leads/<uuid:pk>/activities/', LeadActivityCreateView.as_view(), name='lead-activity-create'),
     path('leads/<uuid:pk>/follow-ups/', LeadFollowUpCreateView.as_view(), name='lead-follow-up-create'),
+    path('leads/<uuid:pk>/site-visits/', LeadSiteVisitCreateView.as_view(), name='lead-site-visit-create'),
+    path('site-visits/', SiteVisitCalendarView.as_view(), name='site-visit-calendar'),
+    path('site-visits/<uuid:pk>/reschedule/', SiteVisitRescheduleView.as_view(), name='site-visit-reschedule'),
+    path('site-visits/<uuid:pk>/complete/', SiteVisitCompleteView.as_view(), name='site-visit-complete'),
+    path('site-visits/<uuid:pk>/cancel/', SiteVisitCancelView.as_view(), name='site-visit-cancel'),
     path('follow-ups/', TaskListView.as_view(), name='task-list'),
     path('follow-ups/<uuid:pk>/complete/', TaskCompleteView.as_view(), name='task-complete'),
     path('follow-ups/<uuid:pk>/reschedule/', TaskRescheduleView.as_view(), name='task-reschedule'),

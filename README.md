@@ -18,6 +18,8 @@ The application has two first-class interfaces:
 - A Kanban board with desktop drag-and-drop, internally scrollable columns, and role-scoped visibility.
 - Follow-up tasks with pending, overdue, done, and cancelled states; complete, reschedule, and cancel workflows.
 - A notification centre for overdue follow-ups, with All/Unread filters, read state, and an unread navigation badge.
+- Repeatable site-visit appointments with date/time, optional address, assigned salesperson, completed/cancelled status, and an optional reminder task one hour before the visit.
+- A role-scoped day/week visit calendar: owners and managers see the active business; salespeople see only their own appointments.
 - Celery-backed follow-up scheduling plus overdue-task and active-membership stale-lead sweeps.
 - Business-local due-date filtering with validated IANA time zones, and transactional task completion, rescheduling, and cancellation that keep task history and alerts in sync.
 - Owner/manager dashboard, source-conversion and stage analytics, reports, and responsive navigation with a collapsible desktop sidebar.
@@ -46,7 +48,7 @@ Owners and managers can choose an assignee while creating or editing a lead. The
 
 Only active members of the **currently selected workspace** are eligible. If a person is not shown, first make them an active team member of that business; Cuein deliberately never assigns a lead across business boundaries. Salespeople create leads assigned to themselves and cannot reassign leads.
 
-## Notifications and business time
+## Notifications, site visits, and business time
 
 Overdue follow-ups create in-app notifications for the assigned person. The
 Notifications page is scoped to the current workspace and signed-in recipient;
@@ -58,6 +60,14 @@ zone when calculating calendar-based views such as follow-ups due today. Task
 completion, rescheduling, and cancellation lock the open task and update its
 status, alert state, and lead timeline together, so an incomplete action is not
 partially saved.
+
+Site visits are separate appointment records, so a lead can have an initial
+inspection and later measurement visit without overwriting history. Moving a
+lead to the Site visit stage prompts the user to schedule an appointment but
+does not require one. Completing or cancelling a visit automatically records a
+timeline entry; an optional reminder becomes a normal Follow-up task one hour
+before the visit. External calendar sync, route planning, and customer
+confirmation messages are intentionally outside this v1 workflow.
 
 ## API overview
 
@@ -79,6 +89,7 @@ partially saved.
 | Change stage | `POST /api/v1/leads/{id}/transition/` |
 | Request follow-up time | `POST /api/v1/leads/{id}/needs-time/` |
 | Follow-up tasks | `/api/v1/follow-up-tasks/` |
+| Site visits | `GET/POST /api/v1/site-visits/`, `POST /api/v1/site-visits/{id}/reschedule/`, `.../{id}/complete/`, `.../{id}/cancel/` |
 | Notifications | `GET /api/v1/notifications/`, `POST /api/v1/notifications/{id}/read/` |
 
 All API routes require JWT authentication except signup, email-code verification, password-reset request/confirmation, token creation, and token refresh. API signup creates only a temporary pending registration and returns a verification-required response; the business, owner account, and JWT access become available only after the owner enters the emailed six-digit code.
@@ -264,5 +275,6 @@ See `PRD-FollowUpCRM.md` for the product requirements, `plan.md` for delivery st
 - Workspace switching, owner-created businesses, business-scoped JWTs, profile photos, and reliable visual lead assignment are implemented.
 - Dashboard analytics and the Smith LLC demo dataset make it possible to inspect realistic pipeline and follow-up states locally.
 - The notification centre, business-timezone due-date calculation, active-membership stale reminders, and transactional task actions are implemented.
+- Site visits support multiple appointments per lead, optional one-hour follow-up reminders, activity history, and role-scoped day/week calendar views.
 - Static/media storage, environment-driven allowed hosts, Gunicorn, WhiteNoise, Docker Compose, health/readiness probes, and request-ID-aware logs are configured.
 - Current hardening priorities are broader automated coverage, CI and live-deployment verification, and pilot validation of reminder defaults.

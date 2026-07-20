@@ -1,0 +1,55 @@
+{% extends 'web/base.html' %}
+{% block body_class %}site-visit-calendar-page{% endblock %}
+{% block title %}{% if is_salesperson %}My visits{% else %}Site visits{% endif %} · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading site-visit-calendar-heading">
+    <div>
+      <p class="eyebrow">ON-SITE APPOINTMENTS</p>
+      <h1>{% if is_salesperson %}My visits{% else %}Site visits{% endif %}</h1>
+      <p>{% if is_salesperson %}Your scheduled customer appointments, separate from follow-up work.{% else %}Scheduled appointments across {{ business.name }}.{% endif %}</p>
+    </div>
+    <div class="site-visit-overview" aria-label="Scheduled visits in this calendar period">
+      <span>Scheduled</span><strong>{{ scheduled_visit_count }}</strong><em>{% if selected_view == 'day' %}For this day{% else %}This week{% endif %}</em>
+    </div>
+  </section>
+
+  <section class="site-visit-calendar panel">
+    <header class="site-visit-calendar-toolbar">
+      <nav class="calendar-view-tabs" aria-label="Calendar view">
+        <a class="calendar-view-tab {% if selected_view == 'day' %}is-active{% endif %}" href="?view=day&amp;date={{ calendar_anchor_date }}">Day</a>
+        <a class="calendar-view-tab {% if selected_view == 'week' %}is-active{% endif %}" href="?view=week&amp;date={{ calendar_anchor_date }}">Week</a>
+      </nav>
+      <div class="calendar-navigation" aria-label="Calendar date navigation">
+        <a class="calendar-nav-button" href="?{{ calendar_previous_query }}" aria-label="Previous period">←</a>
+        <a class="calendar-today-link" href="?{{ calendar_today_query }}">Today</a>
+        <a class="calendar-nav-button" href="?{{ calendar_next_query }}" aria-label="Next period">→</a>
+      </div>
+    </header>
+    <div class="calendar-period-heading"><h2>{{ calendar_title }}</h2><p>{{ business.timezone }}</p></div>
+    <div class="site-visit-calendar-grid {% if selected_view == 'week' %}is-week{% else %}is-day{% endif %}">
+      {% for day in calendar_days %}
+        <section class="site-visit-calendar-day {% if day.is_today %}is-today{% endif %}">
+          <header><span class="calendar-day-name"><span class="calendar-day-name-full">{{ day.label }}</span><span class="calendar-day-name-short">{{ day.short_label }}</span></span><strong>{{ day.date_label }}</strong>{% if day.is_today %}<em>Today</em>{% endif %}</header>
+          <div class="site-visit-calendar-items">
+            {% for visit in day.visits %}
+              <article class="calendar-visit-card">
+                <div class="calendar-visit-time"><time datetime="{{ visit.local_scheduled_iso }}">{{ visit.time_label }}</time></div>
+                <div class="calendar-visit-copy">
+                  <a href="{% url 'web:lead-detail' visit.lead.pk %}">{{ visit.lead.customer_name }}</a>
+                  {% if visit.address %}<p>{{ visit.address }}</p>{% endif %}
+                  <small>{% if is_manager %}{{ visit.assigned_user.get_full_name|default:visit.assigned_user.username }}{% else %}Assigned to you{% endif %}{% if visit.reminder_enabled %} · Reminder set{% endif %}</small>
+                </div>
+                <div class="calendar-visit-actions">
+                  <form method="post" action="{% url 'web:site-visit-complete' visit.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="text-button" type="submit">Complete</button></form>
+                  <form method="post" action="{% url 'web:site-visit-cancel' visit.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button class="text-button text-button-danger" type="submit">Cancel</button></form>
+                </div>
+              </article>
+            {% empty %}
+              <p class="calendar-empty-day">No visits</p>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}
