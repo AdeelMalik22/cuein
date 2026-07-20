@@ -16,9 +16,12 @@ The application has two first-class interfaces:
 - Lead quick-add, search/filtering, assignment, editing, activity timeline, and validated lost reasons.
 - Profile editing with optional profile photos, plus a photo-and-name assignee picker with a fallback avatar.
 - A Kanban board with desktop drag-and-drop, internally scrollable columns, and role-scoped visibility.
-- Follow-up tasks with pending, overdue, done, and cancelled states; complete and reschedule workflows.
-- Celery-backed follow-up scheduling plus overdue-task and stale-lead sweeps.
+- Follow-up tasks with pending, overdue, done, and cancelled states; complete, reschedule, and cancel workflows.
+- A notification centre for overdue follow-ups, with All/Unread filters, read state, and an unread navigation badge.
+- Celery-backed follow-up scheduling plus overdue-task and active-membership stale-lead sweeps.
+- Business-local due-date filtering with validated IANA time zones, and transactional task completion, rescheduling, and cancellation that keep task history and alerts in sync.
 - Owner/manager dashboard, source-conversion and stage analytics, reports, and responsive navigation with a collapsible desktop sidebar.
+- Production baseline configuration: WhiteNoise static files, local development media storage, Gunicorn, Docker Compose, health/readiness probes, and request-ID-aware logging.
 
 ## Multi-tenancy and workspaces
 
@@ -31,6 +34,8 @@ One running application serves independent businesses. Each `Business` is a tena
 - JWTs are scoped to exactly one business. A person with multiple memberships must include `business_id` when requesting a token; the API never trusts a mutable client-supplied workspace header.
 - API and web queries begin with the resolved active business, not the legacy `User.business` compatibility field.
 - Related products, leads, tasks, and users are validated against the same business.
+- Stale-lead reminders select an active owner or manager membership in the selected business. They never rely on a legacy user-to-business field to choose a recipient.
+- Owner-level membership changes are transactional and lock the workspace's membership rows so concurrent requests cannot demote, deactivate, or remove the last active owner.
 - Cross-tenant object lookups return `404` rather than exposing another tenant’s data or object existence.
 
 The `User.business` and `User.role` fields remain temporarily for a safe production rollout. Running `migrate` performs an idempotent membership backfill; operators can also run `python3 manage.py backfill_memberships` to verify or repeat it safely.
@@ -40,6 +45,19 @@ The `User.business` and `User.role` fields remain temporarily for a safe product
 Owners and managers can choose an assignee while creating or editing a lead. The picker shows each eligible teammate's profile photo (or the default avatar), name, and email/username; it also works when JavaScript is unavailable.
 
 Only active members of the **currently selected workspace** are eligible. If a person is not shown, first make them an active team member of that business; Cuein deliberately never assigns a lead across business boundaries. Salespeople create leads assigned to themselves and cannot reassign leads.
+
+## Notifications and business time
+
+Overdue follow-ups create in-app notifications for the assigned person. The
+Notifications page is scoped to the current workspace and signed-in recipient;
+it provides All and Unread filters, lets a person mark an alert as read, and
+shows the current unread total in the navigation.
+
+Cuein stores timestamps in UTC, but uses each business's validated IANA time
+zone when calculating calendar-based views such as follow-ups due today. Task
+completion, rescheduling, and cancellation lock the open task and update its
+status, alert state, and lead timeline together, so an incomplete action is not
+partially saved.
 
 ## API overview
 
@@ -61,7 +79,7 @@ Only active members of the **currently selected workspace** are eligible. If a p
 | Change stage | `POST /api/v1/leads/{id}/transition/` |
 | Request follow-up time | `POST /api/v1/leads/{id}/needs-time/` |
 | Follow-up tasks | `/api/v1/follow-up-tasks/` |
-| Notifications | `/api/v1/notifications/` |
+| Notifications | `GET /api/v1/notifications/`, `POST /api/v1/notifications/{id}/read/` |
 
 All API routes require JWT authentication except signup, email-code verification, password-reset request/confirmation, token creation, and token refresh. API signup creates only a temporary pending registration and returns a verification-required response; the business, owner account, and JWT access become available only after the owner enters the emailed six-digit code.
 
@@ -108,6 +126,10 @@ For an account with more than one workspace, obtain a token for a specific busin
    POSTGRES_PORT=5432
    ```
 
+   Uploaded profile pictures use the local `media/` directory in development.
+   Django serves them at `/media/` while `DEBUG=true`; do not treat that local
+   backend as production media storage.
+
    To deliver verification codes outside local development, add your SMTP provider settings. Use an app password or provider-issued SMTP credential—never a normal mailbox password—and keep this file out of version control:
 
    ```text
@@ -127,7 +149,7 @@ For an account with more than one workspace, obtain a token for a specific busin
 
    Signup verification codes expire after 24 hours by default; password-reset codes expire after 15 minutes. A recipient can receive a replacement code once per minute by default. Change the values in seconds if needed. In local development, email uses Django’s console backend by default, so the verification code is printed in the server terminal.
 
-   For production, configure the following as well. Setting `DJANGO_ENV=production` disables debug mode, requires a unique secret and allowed hosts, and enables HTTPS-only cookies, HTTPS redirect, HSTS, and secure response headers:
+   For production, configure the following as well. Setting `DJANGO_ENV=production` disables debug mode, requires a unique secret and `DJANGO_ALLOWED_HOSTS`, and enables HTTPS-only cookies, HTTPS redirect, HSTS, and secure response headers. The host list is read from that environment variable rather than hard-coded in settings:
 
    ```text
    DJANGO_ENV=production
@@ -222,6 +244,8 @@ ps`, not `systemctl status redis`.
 
 Use a production `.env` with the required `DJANGO_ENV`, secret, host, and SMTP
 settings from the local setup section before exposing the proxy publicly.
+The Compose files are deployment configuration only; they do not start or
+manage services until an operator runs the commands above.
 
 ## Important development rule
 
@@ -239,4 +263,6 @@ See `PRD-FollowUpCRM.md` for the product requirements, `plan.md` for delivery st
 - Automation services, dashboards, reports, and role-scoped management views are implemented.
 - Workspace switching, owner-created businesses, business-scoped JWTs, profile photos, and reliable visual lead assignment are implemented.
 - Dashboard analytics and the Smith LLC demo dataset make it possible to inspect realistic pipeline and follow-up states locally.
-- Current hardening priorities are broader automated coverage, CI/deployment readiness, and pilot validation of reminder defaults.
+- The notification centre, business-timezone due-date calculation, active-membership stale reminders, and transactional task actions are implemented.
+- Static/media storage, environment-driven allowed hosts, Gunicorn, WhiteNoise, Docker Compose, health/readiness probes, and request-ID-aware logs are configured.
+- Current hardening priorities are broader automated coverage, CI and live-deployment verification, and pilot validation of reminder defaults.
