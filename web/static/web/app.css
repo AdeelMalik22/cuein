@@ -9205,6 +9205,18 @@ body.campaign-reference-page .campaign-reference-topbar {
     padding: .75rem .85rem;
 }
 
+.campaign-reference-review .campaign-reference-actions {
+    background: transparent;
+    border: 0;
+    border-top: 1px solid #e7e7e4;
+    border-radius: 0;
+    box-shadow: none;
+    grid-column: auto;
+    margin: 1.2rem -2rem -1.85rem;
+    padding: 1rem 2rem 1.2rem;
+    position: static;
+}
+
 .campaign-reference-actions .campaign-draft-status {
     border-left: 1px solid var(--line);
     margin: 0 auto 0 0;
@@ -9294,6 +9306,14 @@ body.campaign-reference-page .campaign-reference-topbar {
     .campaign-reference-actions {
         align-items: stretch;
         flex-wrap: wrap;
+    }
+
+    .campaign-reference-review .campaign-reference-actions {
+        margin-left: -1rem;
+        margin-right: -1rem;
+        margin-bottom: -1.35rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
     }
 
     .campaign-review-status,

@@ -80,6 +80,7 @@
       <section class="campaign-reference-section campaign-reference-review" id="campaign-review" data-campaign-review-summary>
         <header class="campaign-reference-section-heading"><div><span class="campaign-reference-step">4</span><h2>Review</h2></div></header>
         <div class="campaign-review-status"><strong data-review-copy>Review your campaign</strong><small data-review-detail>Complete the message before queueing.</small></div>
+        <div class="campaign-reference-actions campaign-sticky-bar"><span class="campaign-draft-status" data-campaign-draft-status aria-live="polite">Not saved</span><a class="button button-muted" href="{% url 'web:email-campaign-list' %}">Cancel</a><button class="button button-muted" type="button" data-save-campaign-draft>Save draft</button><button class="button button-muted" type="submit" name="action" value="test">Send test email</button><button class="button button-dark" type="submit" name="action" value="queue">Queue campaign</button></div>
       </section>
     </main>
 
@@ -97,6 +98,5 @@
       </section>
     </aside>
 
-    <div class="campaign-reference-actions campaign-sticky-bar"><span class="campaign-draft-status" data-campaign-draft-status aria-live="polite">Not saved</span><a class="button button-muted" href="{% url 'web:email-campaign-list' %}">Cancel</a><button class="button button-muted" type="button" data-save-campaign-draft>Save draft</button><button class="button button-muted" type="submit" name="action" value="test">Send test email</button><button class="button button-dark" type="submit" name="action" value="queue">Queue campaign</button></div>
   </form>
 {% endblock %}
