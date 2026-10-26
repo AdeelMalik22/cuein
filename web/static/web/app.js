@@ -528,9 +528,12 @@
       var hasSubject = Boolean(subjectInput.value.trim());
       var hasBody = Boolean(plainFromEditor());
       var eligibleCount = eligible.textContent.trim();
-      summary.querySelector("strong").textContent = hasSubject && hasBody
-        ? eligibleCount + " eligible contact" + (eligibleCount === "1" ? "" : "s") + " ready"
-        : "Complete the message and audience above.";
+      var reviewCopy = summary.querySelector("[data-review-copy]") || summary.querySelector("strong");
+      var reviewDetail = summary.querySelector("[data-review-detail]");
+      if (reviewCopy) reviewCopy.textContent = "4  Review";
+      if (reviewDetail) reviewDetail.textContent = hasSubject && hasBody
+        ? eligibleCount + " eligible contact" + (eligibleCount === "1" ? "" : "s") + " ready to queue"
+        : "Complete the message before queueing";
     }
 
     function updatePreview() {
