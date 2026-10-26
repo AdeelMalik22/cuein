@@ -6,6 +6,17 @@
     <section class="quick-add-card">
       <form method="post" class="quick-add-form">{% csrf_token %}
         {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        {% if form.duplicate_leads %}
+          <div class="form-errors duplicate-warning">
+            <strong>Possible duplicate lead</strong>
+            <p>We found these existing leads with the same phone number or email:</p>
+            <ul>
+              {% for duplicate in form.duplicate_leads %}
+                <li><a href="{% url 'web:lead-detail' duplicate.pk %}">{{ duplicate.customer_name }}</a> · {{ duplicate.phone }}{% if duplicate.email %} · {{ duplicate.email }}{% endif %}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
         {% for field in form %}
           {% if field.name == 'assigned_user' %}
             <fieldset class="field assignee-field">
@@ -14,6 +25,8 @@
               <small class="field-hint">Choose a teammate, or keep this lead with you.</small>
               {% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}
             </fieldset>
+          {% elif field.name == 'confirm_duplicate' %}
+            <label class="field checkbox-field"><span>{{ field }} {{ field.label }}</span>{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
           {% else %}
             <label class="field {% if field.name == 'customer_name' or field.name == 'phone' or field.name == 'source' %}field-large{% endif %}"><span>{{ field.label }}{% if field.field.required %}<b aria-hidden="true">*</b>{% endif %}</span>{{ field }}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
           {% endif %}

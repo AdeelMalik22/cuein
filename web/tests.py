@@ -1126,3 +1126,130 @@ class SiteVisitWebTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'Manager-only measurement note')
+
+
+class LeadManagementToolsTests(TestCase):
+    def setUp(self):
+        self.business = Business.objects.create(name='North Star Solar')
+        self.owner = User.objects.create_user(
+            username='tools-owner', password='test-password', email='owner@northstar.example',
+            business=self.business, role=User.Role.OWNER,
+        )
+        self.salesperson = User.objects.create_user(
+            username='tools-sales', password='test-password', email='sales@northstar.example',
+            business=self.business, role=User.Role.SALESPERSON,
+        )
+        self.client.force_login(self.owner)
+
+    def create_lead(self, **overrides):
+        values = {
+            'business': self.business,
+            'customer_name': 'Ayesha Khan',
+            'phone': '03001234567',
+            'email': 'ayesha@example.com',
+            'assigned_user': self.owner,
+        }
+        values.update(overrides)
+        return Lead.objects.create(**values)
+
+    def test_quick_add_warns_about_duplicate_and_allows_explicit_confirmation(self):
+        existing = self.create_lead()
+
+        response = self.client.post(reverse('web:lead-create'), {
+            'customer_name': 'Ayesha Again',
+            'phone': existing.phone,
+            'email': existing.email,
+            'source': Lead.Source.PHONE_CALL,
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Possible duplicate lead')
+        self.assertEqual(Lead.objects.filter(business=self.business).count(), 1)
+
+        response = self.client.post(reverse('web:lead-create'), {
+            'customer_name': 'Ayesha Again',
+            'phone': existing.phone,
+            'email': existing.email,
+            'source': Lead.Source.PHONE_CALL,
+            'confirm_duplicate': 'on',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Lead.objects.filter(business=self.business).count(), 2)
+
+    def test_csv_import_skips_duplicates_and_creates_new_leads(self):
+        self.create_lead()
+        csv_file = SimpleUploadedFile(
+            'leads.csv',
+            b'customer_name,phone,email,source,assigned_user\n'
+            b'Ayesha Again,03001234567,ayesha@example.com,phone_call,tools-owner\n'
+            b'Bilal Ahmed,03007654321,bilal@example.com,website,tools-sales\n',
+            content_type='text/csv',
+        )
+
+        response = self.client.post(reverse('web:lead-import'), {'csv_file': csv_file})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '1 lead added')
+        self.assertContains(response, 'Skipped duplicates')
+        imported = Lead.objects.get(phone='03007654321')
+        self.assertEqual(imported.assigned_user, self.salesperson)
+
+    def test_export_is_tenant_scoped_csv(self):
+        self.create_lead()
+        response = self.client.get(reverse('web:lead-export'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'text/csv; charset=utf-8')
+        self.assertIn('customer_name,phone,email', response.content.decode())
+        self.assertIn('Ayesha Khan', response.content.decode())
+
+    def test_manager_can_bulk_assign_and_move_leads(self):
+        first = self.create_lead(customer_name='First lead', phone='03000000001', email='first@example.com')
+        second = self.create_lead(customer_name='Second lead', phone='03000000002', email='second@example.com')
+
+        response = self.client.post(reverse('web:lead-bulk-action'), {
+            'lead_ids': [str(first.pk), str(second.pk)],
+            'action': 'assign',
+            'assigned_user': str(self.salesperson.pk),
+            'next': reverse('web:lead-stage-list', args=[Lead.Stage.NEW_INQUIRY]),
+        })
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Lead.objects.filter(pk__in=[first.pk, second.pk], assigned_user=self.salesperson).count(), 2)
+
+        self.client.post(reverse('web:lead-bulk-action'), {
+            'lead_ids': [str(first.pk), str(second.pk)],
+            'action': 'stage',
+            'stage': Lead.Stage.CONTACTED,
+            'next': reverse('web:lead-stage-list', args=[Lead.Stage.NEW_INQUIRY]),
+        })
+
+        self.assertEqual(Lead.objects.filter(pk__in=[first.pk, second.pk], stage=Lead.Stage.CONTACTED).count(), 2)
+
+    def test_won_lead_exposes_customer_history(self):
+        won = self.create_lead(customer_name='Ayesha Won', stage=Lead.Stage.WON, closed_at=timezone.now())
+        self.create_lead(customer_name='Ayesha Earlier', stage=Lead.Stage.LOST, lost_reason='No budget')
+
+        response = self.client.get(reverse('web:customer-history', args=[won.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ayesha Won')
+        self.assertContains(response, 'Ayesha Earlier')
+
+    def test_contacts_groups_leads_by_phone_and_links_to_history(self):
+        first = self.create_lead(customer_name='Returning Customer', stage=Lead.Stage.WON, closed_at=timezone.now())
+        self.create_lead(
+            customer_name='Returning Customer',
+            phone=first.phone,
+            email=first.email,
+            stage=Lead.Stage.LOST,
+            lost_reason='Project paused',
+        )
+
+        response = self.client.get(reverse('web:contact-list'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Returning Customer')
+        self.assertContains(response, '>2<')
+        self.assertContains(response, reverse('web:customer-history', args=[first.pk]))

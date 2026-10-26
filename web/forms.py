@@ -17,6 +17,7 @@ from core.security import clear_login_failures, client_ip, login_attempt_state, 
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product, SiteVisit
+from leads.services import related_leads_for_customer
 
 
 TIMEZONE_REGIONS = (
@@ -516,9 +517,14 @@ class BusinessForm(forms.ModelForm):
 class LeadQuickAddForm(forms.ModelForm):
     """The deliberately small, phone-friendly lead capture form."""
 
+    confirm_duplicate = forms.BooleanField(
+        required=False,
+        label='I checked the possible duplicates and want to add this lead anyway',
+    )
+
     class Meta:
         model = Lead
-        fields = ('customer_name', 'phone', 'source', 'assigned_user')
+        fields = ('customer_name', 'phone', 'email', 'source', 'assigned_user')
 
     def __init__(self, *args, business, user, role=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -535,6 +541,62 @@ class LeadQuickAddForm(forms.ModelForm):
         self.fields['assigned_user'].widget.choices = self.fields['assigned_user'].choices
         if (role or user.role) == User.Role.SALESPERSON:
             self.fields.pop('assigned_user')
+
+        self.fields['confirm_duplicate'].widget.attrs['class'] = 'duplicate-confirmation'
+        self.duplicate_leads = []
+
+    def clean(self):
+        cleaned_data = super().clean()
+        self.duplicate_leads = list(related_leads_for_customer(
+            business=self.business,
+            phone=cleaned_data.get('phone', ''),
+            email=cleaned_data.get('email', ''),
+        )[:5])
+        if self.duplicate_leads and not cleaned_data.get('confirm_duplicate'):
+            raise ValidationError(
+                'A lead with this phone number or email already exists. Review the matches below, '
+                'or confirm that you want to add another lead.'
+            )
+        return cleaned_data
+
+
+class LeadImportForm(forms.Form):
+    csv_file = forms.FileField(
+        label='CSV file',
+        help_text=(
+            'Required columns: customer_name, phone. Optional: email, source, stage, '
+            'quoted_price, product, assigned_user, lost_reason.'
+        ),
+        widget=forms.ClearableFileInput(attrs={'accept': '.csv,text/csv'}),
+    )
+
+
+class LeadBulkActionForm(forms.Form):
+    action = forms.ChoiceField(choices=(
+        ('assign', 'Assign selected leads'),
+        ('stage', 'Move selected leads'),
+    ))
+    assigned_user = forms.ModelChoiceField(queryset=User.objects.none(), required=False)
+    stage = forms.ChoiceField(choices=Lead.Stage.choices, required=False)
+    lost_reason = forms.CharField(required=False, widget=forms.TextInput())
+
+    def __init__(self, *args, business, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['assigned_user'].queryset = users_for_business(business).order_by(
+            'first_name', 'last_name', 'username',
+        )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get('action') == 'assign' and not cleaned_data.get('assigned_user'):
+            self.add_error('assigned_user', 'Choose a teammate.')
+        if cleaned_data.get('action') == 'stage':
+            stage = cleaned_data.get('stage')
+            if not stage:
+                self.add_error('stage', 'Choose a stage.')
+            elif stage == Lead.Stage.LOST and not cleaned_data.get('lost_reason', '').strip():
+                self.add_error('lost_reason', 'A lost reason is required when moving leads to Lost.')
+        return cleaned_data
 
 
 class LeadDetailsForm(forms.ModelForm):

@@ -1,0 +1,26 @@
+{% extends 'web/base.html' %}
+{% block title %}Customer history · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div><a class="back-link" href="{% url 'web:lead-detail' lead.pk %}"><span aria-hidden="true">←</span> Back to {{ lead.customer_name }}</a><p class="eyebrow">CUSTOMER HISTORY</p><h1>{{ lead.customer_name }}</h1><p>{{ lead.phone }}{% if lead.email %} · {{ lead.email }}{% endif %}</p></div>
+  </section>
+  <section class="lead-detail-grid">
+    <article class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">PAST OPPORTUNITIES</p><h2>{{ customer_leads|length }} lead{{ customer_leads|length|pluralize }}</h2></div></div>
+      <div class="member-list">
+        {% for customer_lead in customer_leads %}
+          <article class="member-row">
+            <div><a href="{% url 'web:lead-detail' customer_lead.pk %}"><strong>{{ customer_lead.customer_name }}</strong></a><p>{{ customer_lead.get_stage_display }}{% if customer_lead.product %} · {{ customer_lead.product.name }}{% endif %}</p><small>{{ customer_lead.created_at|date:'M j, Y' }} · {{ customer_lead.assigned_user.get_full_name|default:customer_lead.assigned_user.username }}</small></div>
+            <span class="stage-pill">{{ customer_lead.get_stage_display }}</span>
+          </article>
+        {% empty %}<div class="empty-state">No other leads found for this customer.</div>{% endfor %}
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">TIMELINE</p><h2>Everything logged</h2></div></div>
+      <div class="timeline">
+        {% for activity in history_activities %}<article class="timeline-item"><span class="timeline-dot {% if activity.kind == 'stage_change' %}stage-change{% endif %}" aria-hidden="true"></span><div><div class="timeline-item-top"><strong>{{ activity.get_kind_display }}</strong><time>{{ activity.created_at|date:'M j · g:i A' }}</time></div><p><a href="{% url 'web:lead-detail' activity.lead.pk %}">{{ activity.lead.customer_name }}</a> · {{ activity.content }}</p></div></article>{% empty %}<div class="empty-state">No timeline activity yet.</div>{% endfor %}
+      </div>
+    </article>
+  </section>
+{% endblock %}

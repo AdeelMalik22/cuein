@@ -1,3 +1,7 @@
+import csv
+import io
+import re
+from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 from uuid import UUID
@@ -10,7 +14,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
 from django.db.models.functions import TruncDate
-from django.http import Http404, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
+from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views import View
@@ -56,6 +61,7 @@ from leads.services import (
     record_lead_capture,
     record_manual_activity,
     record_needs_time,
+    related_leads_for_customer,
     reschedule_site_visit,
     schedule_site_visit,
     transition_lead,
@@ -67,8 +73,10 @@ from .forms import (
     CurrentPasswordChangeForm,
     EmailVerificationCodeForm,
     EmailVerificationResendForm,
+    LeadBulkActionForm,
     LeadDetailsForm,
     LeadFollowUpForm,
+    LeadImportForm,
     LeadQuickAddForm,
     LeadStageForm,
     ProfileForm,
@@ -856,6 +864,7 @@ class LeadStageListView(TenantWebMixin, ListView):
             ) if self.is_manager() else [self.request.user],
             'products': Product.objects.for_business(self.get_business()).filter(is_active=True).order_by('name'),
             'query_string': query_params.urlencode(),
+            'bulk_action_form': LeadBulkActionForm(business=self.get_business()),
         })
         return context
 
@@ -888,6 +897,312 @@ class LeadCreateView(TenantWebMixin, FormView):
             transaction.on_commit(lambda: invalidate_business_lead_cache(lead.business_id))
         messages.success(self.request, f'{lead.customer_name} is now in your pipeline.')
         return redirect('web:lead-detail', pk=lead.pk)
+
+
+class LeadExportView(TenantWebMixin, View):
+    """Export the current user's tenant-scoped leads as a spreadsheet-friendly CSV."""
+
+    def get_queryset(self):
+        queryset = self.visible_leads().select_related('assigned_user', 'product')
+        search = self.request.GET.get('q', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(customer_name__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(email__icontains=search),
+            )
+        stage = self.request.GET.get('stage', '')
+        if stage in Lead.Stage.values:
+            queryset = queryset.filter(stage=stage)
+        assigned_user = self.request.GET.get('assigned_user', '')
+        if assigned_user:
+            try:
+                queryset = queryset.filter(assigned_user_id=UUID(assigned_user))
+            except (TypeError, ValueError, AttributeError):
+                return queryset.none()
+        return queryset.order_by('-updated_at', '-id')
+
+    def get(self, request, *args, **kwargs):
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="cuein-leads.csv"'
+        writer = csv.writer(response)
+        writer.writerow((
+            'customer_name', 'phone', 'email', 'source', 'product', 'stage',
+            'quoted_price', 'assigned_user', 'lost_reason', 'created_at', 'updated_at',
+        ))
+        for lead in self.get_queryset().iterator():
+            writer.writerow((
+                lead.customer_name,
+                lead.phone,
+                lead.email,
+                lead.source,
+                lead.product.name if lead.product else '',
+                lead.stage,
+                lead.quoted_price or '',
+                lead.assigned_user.username,
+                lead.lost_reason,
+                lead.created_at.isoformat(),
+                lead.updated_at.isoformat(),
+            ))
+        return response
+
+
+class ContactListView(TenantWebMixin, TemplateView):
+    """Show one customer contact per phone number across visible leads."""
+
+    template_name = 'web/contact_list.html'
+
+    @staticmethod
+    def contact_key(lead):
+        phone_key = re.sub(r'\D+', '', lead.phone or '')
+        return phone_key or (lead.email or lead.customer_name).strip().casefold()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        search = self.request.GET.get('q', '').strip()
+        leads = self.visible_leads().order_by('-updated_at', '-id')
+        if search:
+            leads = leads.filter(
+                Q(customer_name__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(email__icontains=search),
+            )
+
+        contacts = {}
+        for lead in leads.iterator():
+            key = self.contact_key(lead)
+            contact = contacts.setdefault(key, {
+                'lead': lead,
+                'name': lead.customer_name,
+                'phone': lead.phone,
+                'email': lead.email,
+                'lead_count': 0,
+                'won_count': 0,
+                'open_count': 0,
+                'last_activity_at': lead.last_activity_at,
+            })
+            contact['lead_count'] += 1
+            contact['won_count'] += int(lead.stage == Lead.Stage.WON)
+            contact['open_count'] += int(lead.stage not in (Lead.Stage.WON, Lead.Stage.LOST))
+            if lead.updated_at > contact['lead'].updated_at:
+                contact['lead'] = lead
+                contact['name'] = lead.customer_name
+                contact['phone'] = lead.phone
+                contact['email'] = lead.email or contact['email']
+            if lead.last_activity_at > contact['last_activity_at']:
+                contact['last_activity_at'] = lead.last_activity_at
+
+        contact_list = sorted(
+            contacts.values(),
+            key=lambda contact: (contact['last_activity_at'], contact['name'].casefold()),
+            reverse=True,
+        )
+        context.update(self.common_context())
+        context.update({
+            'contacts': contact_list,
+            'search': search,
+            'contact_count': len(contact_list),
+        })
+        return context
+
+
+class LeadImportView(ManagerRequiredMixin, FormView):
+    template_name = 'web/lead_import.html'
+    form_class = LeadImportForm
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
+    def form_valid(self, form):
+        try:
+            text = form.cleaned_data['csv_file'].read().decode('utf-8-sig')
+        except UnicodeDecodeError:
+            form.add_error('csv_file', 'Use a UTF-8 CSV file.')
+            return self.form_invalid(form)
+
+        reader = csv.DictReader(io.StringIO(text))
+        headers = {header.strip().lower() for header in (reader.fieldnames or []) if header}
+        missing_headers = {'customer_name', 'phone'} - headers
+        if missing_headers:
+            form.add_error(
+                'csv_file',
+                f'Missing required column(s): {", ".join(sorted(missing_headers))}.',
+            )
+            return self.form_invalid(form)
+
+        business = self.get_business()
+        members = list(users_for_business(business))
+        users_by_key = {
+            key: member
+            for member in members
+            for key in (member.username.casefold(), member.email.casefold() if member.email else '')
+            if key
+        }
+        products_by_name = {
+            product.name.casefold(): product
+            for product in Product.objects.for_business(business).filter(is_active=True)
+        }
+        source_values = {value: value for value, _label in Lead.Source.choices}
+        source_values.update({label.casefold(): value for value, label in Lead.Source.choices})
+        stage_values = {value: value for value, _label in Lead.Stage.choices}
+        stage_values.update({label.casefold(): value for value, label in Lead.Stage.choices})
+
+        created = 0
+        skipped_duplicates = []
+        errors = []
+        with transaction.atomic():
+            for row_number, raw_row in enumerate(reader, start=2):
+                row = {
+                    str(key).strip().lower(): (value or '').strip()
+                    for key, value in raw_row.items()
+                    if key
+                }
+                customer_name = row.get('customer_name', '')
+                phone = row.get('phone', '')
+                if not customer_name or not phone:
+                    errors.append(f'Row {row_number}: customer_name and phone are required.')
+                    continue
+
+                source = source_values.get(row.get('source', '').casefold(), Lead.Source.OTHER)
+                stage = stage_values.get(row.get('stage', '').casefold(), Lead.Stage.NEW_INQUIRY)
+                if row.get('source') and row['source'].casefold() not in source_values:
+                    errors.append(f'Row {row_number}: unknown source "{row["source"]}".')
+                    continue
+                if row.get('stage') and row['stage'].casefold() not in stage_values:
+                    errors.append(f'Row {row_number}: unknown stage "{row["stage"]}".')
+                    continue
+                lost_reason = row.get('lost_reason', '')
+                if stage == Lead.Stage.LOST and not lost_reason:
+                    errors.append(f'Row {row_number}: lost_reason is required for Lost leads.')
+                    continue
+
+                quoted_price = None
+                if row.get('quoted_price'):
+                    try:
+                        quoted_price = Decimal(row['quoted_price'])
+                    except InvalidOperation:
+                        errors.append(f'Row {row_number}: quoted_price must be a number.')
+                        continue
+                    if quoted_price < 0:
+                        errors.append(f'Row {row_number}: quoted_price cannot be negative.')
+                        continue
+
+                assigned_user = self.request.user
+                if row.get('assigned_user'):
+                    assigned_user = users_by_key.get(row['assigned_user'].casefold())
+                    if assigned_user is None:
+                        errors.append(f'Row {row_number}: assigned_user was not found in this workspace.')
+                        continue
+                product = None
+                if row.get('product'):
+                    product = products_by_name.get(row['product'].casefold())
+                    if product is None:
+                        errors.append(f'Row {row_number}: product was not found in this workspace.')
+                        continue
+
+                duplicates = related_leads_for_customer(
+                    business=business,
+                    phone=phone,
+                    email=row.get('email', ''),
+                )
+                if duplicates.exists():
+                    duplicate = duplicates.first()
+                    skipped_duplicates.append(
+                        f'Row {row_number} ({customer_name}) matches {duplicate.customer_name}.',
+                    )
+                    continue
+
+                lead = Lead.objects.create(
+                    business=business,
+                    customer_name=customer_name,
+                    phone=phone,
+                    email=row.get('email', ''),
+                    source=source,
+                    product=product,
+                    stage=stage,
+                    quoted_price=quoted_price,
+                    assigned_user=assigned_user,
+                    lost_reason=lost_reason,
+                    closed_at=timezone.now() if stage in (Lead.Stage.WON, Lead.Stage.LOST) else None,
+                )
+                record_lead_capture(lead=lead, actor=self.request.user)
+                created += 1
+            if created:
+                transaction.on_commit(lambda: invalidate_business_lead_cache(business.id))
+
+        context = self.get_context_data(form=form)
+        context.update({
+            'import_completed': True,
+            'import_created': created,
+            'import_skipped_duplicates': skipped_duplicates,
+            'import_errors': errors,
+        })
+        return self.render_to_response(context)
+
+
+class LeadBulkActionView(ManagerRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        selected_ids = request.POST.getlist('lead_ids')
+        form = LeadBulkActionForm(request.POST, business=self.get_business())
+        fallback = request.POST.get('next') or reverse('web:lead-list')
+        if not selected_ids:
+            messages.error(request, 'Select at least one lead first.')
+            return redirect(safe_post_redirect(request, fallback))
+        if not form.is_valid():
+            messages.error(request, 'Choose a valid bulk action and its target value.')
+            return redirect(safe_post_redirect(request, fallback))
+
+        with transaction.atomic():
+            leads = list(
+                Lead.objects.for_business(self.get_business())
+                .select_for_update()
+                .filter(pk__in=selected_ids),
+            )
+            action = form.cleaned_data['action']
+            if action == 'assign':
+                assigned_user = form.cleaned_data['assigned_user']
+                for lead in leads:
+                    lead.assigned_user = assigned_user
+                    lead.save(update_fields=('assigned_user', 'updated_at'))
+                message = f'{len(leads)} lead(s) assigned.'
+            else:
+                for lead in leads:
+                    transition_lead(
+                        lead=lead,
+                        stage=form.cleaned_data['stage'],
+                        lost_reason=form.cleaned_data.get('lost_reason', ''),
+                        actor=request.user,
+                    )
+                message = f'{len(leads)} lead(s) moved to {Lead.Stage(form.cleaned_data["stage"]).label}.'
+            transaction.on_commit(lambda: invalidate_business_lead_cache(self.get_business().id))
+        messages.success(request, message)
+        return redirect(safe_post_redirect(request, fallback))
+
+
+class CustomerHistoryView(TenantWebMixin, TemplateView):
+    template_name = 'web/customer_history.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        lead = self.get_visible_lead(self.kwargs['pk'])
+        customer_match = Q(phone__iexact=lead.phone.strip())
+        if lead.email:
+            customer_match |= Q(email__iexact=lead.email.strip())
+        customer_leads = list(
+            self.visible_leads().filter(customer_match).order_by('-updated_at', '-id'),
+        )
+        history_activities = Activity.objects.for_business(self.get_business()).filter(
+            lead__in=customer_leads,
+        ).select_related('lead', 'created_by')[:50]
+        context.update(self.common_context())
+        context.update({
+            'lead': lead,
+            'customer_leads': customer_leads,
+            'history_activities': history_activities,
+        })
+        return context
 
 
 class LeadDetailView(TenantWebMixin, TemplateView):

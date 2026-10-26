@@ -1,0 +1,37 @@
+{% extends 'web/base.html' %}
+{% block title %}Contacts · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div><p class="eyebrow">CUSTOMER DIRECTORY</p><h1>Contacts</h1><p>{{ contact_count }} customer{{ contact_count|pluralize }} from your visible leads.</p></div>
+    <a class="button button-dark" href="{% url 'web:lead-create' %}">Add a lead <span aria-hidden="true">+</span></a>
+  </section>
+
+  <form class="lead-filter" method="get">
+    <label class="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input name="q" value="{{ search }}" placeholder="Search name, phone, or email"></label>
+    <button class="button button-muted" type="submit">Search</button>
+    {% if search %}<a class="clear-filter" href="{% url 'web:contact-list' %}">Clear</a>{% endif %}
+  </form>
+
+  <section class="panel contact-list-panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Contact</th><th>Phone</th><th>Email</th><th>Leads</th><th>Open</th><th>Won</th><th>Last activity</th></tr></thead>
+        <tbody>
+          {% for contact in contacts %}
+            <tr>
+              <td><a class="table-lead-link" href="{% url 'web:customer-history' contact.lead.pk %}"><strong>{{ contact.name }}</strong><small>View customer history</small></a></td>
+              <td>{{ contact.phone }}</td>
+              <td>{{ contact.email|default:'—' }}</td>
+              <td>{{ contact.lead_count }}</td>
+              <td>{{ contact.open_count }}</td>
+              <td>{{ contact.won_count }}</td>
+              <td><time>{{ contact.last_activity_at|timesince }} ago</time></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="stage-list-empty">No contacts match this search.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

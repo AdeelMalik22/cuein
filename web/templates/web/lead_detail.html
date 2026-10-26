@@ -21,7 +21,7 @@
 {% block content %}
   <a class="back-link detail-back-link" href="{% url 'web:lead-list' %}"><span aria-hidden="true">←</span> Back to pipeline</a>
   <section class="lead-detail-heading">
-    <div><p class="eyebrow">{{ lead.get_stage_display }}</p><h1>{{ lead.customer_name }}</h1><p>{{ lead.phone }}{% if lead.email %} · {{ lead.email }}{% endif %}</p></div>
+    <div><p class="eyebrow">{{ lead.get_stage_display }}</p><h1>{{ lead.customer_name }}</h1><p>{{ lead.phone }}{% if lead.email %} · {{ lead.email }}{% endif %}</p>{% if lead.stage == 'won' %}<a class="text-button" href="{% url 'web:customer-history' lead.pk %}">View customer history →</a>{% endif %}</div>
     <div class="lead-heading-meta"><span class="stage-pill stage-pill-large">{{ lead.get_stage_display }}</span><small>Last activity {{ lead.last_activity_at|timesince }} ago</small></div>
   </section>
 

@@ -22,12 +22,25 @@
   </form>
 
   <section class="panel lead-stage-table-panel">
+    {% if is_manager %}
+      <form id="bulk-leads-form" method="post" action="{% url 'web:lead-bulk-action' %}" class="bulk-lead-toolbar">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <strong>Bulk actions</strong>
+        <label class="select-field"><span class="sr-only">Bulk action</span>{{ bulk_action_form.action }}</label>
+        <label class="select-field"><span class="sr-only">Assign selected leads to</span>{{ bulk_action_form.assigned_user }}</label>
+        <label class="select-field"><span class="sr-only">Move selected leads to</span>{{ bulk_action_form.stage }}</label>
+        <label class="field bulk-lost-reason"><span class="sr-only">Lost reason</span>{{ bulk_action_form.lost_reason }}</label>
+        <button class="button button-muted" type="submit">Apply to selected</button>
+      </form>
+    {% endif %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Lead</th><th>Service</th><th>Source</th><th>Quote</th><th>Owner</th><th>Last activity</th></tr></thead>
+        <thead><tr>{% if is_manager %}<th><span class="sr-only">Select</span></th>{% endif %}<th>Lead</th><th>Service</th><th>Source</th><th>Quote</th><th>Owner</th><th>Last activity</th></tr></thead>
         <tbody>
           {% for lead in leads %}
             <tr>
+              {% if is_manager %}<td><input type="checkbox" name="lead_ids" value="{{ lead.pk }}" form="bulk-leads-form" aria-label="Select {{ lead.customer_name }}"></td>{% endif %}
               <td><a class="table-lead-link" href="{% url 'web:lead-detail' lead.pk %}"><strong>{{ lead.customer_name }}</strong><small>{{ lead.phone }}{% if lead.email %} · {{ lead.email }}{% endif %}</small></a></td>
               <td>{{ lead.product|default:'Service to be confirmed' }}</td>
               <td>{{ lead.get_source_display }}</td>
@@ -36,7 +49,7 @@
               <td><time>{{ lead.last_activity_at|timesince }} ago</time></td>
             </tr>
           {% empty %}
-            <tr><td colspan="6" class="stage-list-empty">No leads match these filters.</td></tr>
+            <tr><td colspan="7" class="stage-list-empty">No leads match these filters.</td></tr>
           {% endfor %}
         </tbody>
       </table>

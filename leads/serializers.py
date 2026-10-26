@@ -8,7 +8,7 @@ from core.models import User
 from core.tenancy import active_business, active_role, is_active_member_of_business
 
 from .models import Activity, Lead, Product, SiteVisit
-from .services import record_manual_activity
+from .services import record_manual_activity, related_leads_for_customer
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -30,6 +30,7 @@ class ProductSerializer(serializers.ModelSerializer):
 class LeadSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     assigned_user_name = serializers.CharField(source='assigned_user.username', read_only=True)
+    confirm_duplicate = serializers.BooleanField(write_only=True, required=False, default=False)
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), required=False, allow_null=True)
     assigned_user = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), required=False)
 
@@ -52,6 +53,7 @@ class LeadSerializer(serializers.ModelSerializer):
             'closed_at',
             'created_at',
             'updated_at',
+            'confirm_duplicate',
         )
         read_only_fields = ('id', 'stage', 'lost_reason', 'last_activity_at', 'closed_at', 'created_at', 'updated_at')
 
@@ -71,6 +73,24 @@ class LeadSerializer(serializers.ModelSerializer):
         assigned_user = attrs.get('assigned_user')
         if assigned_user and not is_active_member_of_business(assigned_user, business.id):
             raise serializers.ValidationError({'assigned_user': 'The assigned user must be active.'})
+        confirm_duplicate = attrs.pop('confirm_duplicate', False)
+        if self.instance is None and not confirm_duplicate:
+            duplicates = related_leads_for_customer(
+                business=business,
+                phone=attrs.get('phone', ''),
+                email=attrs.get('email', ''),
+            )[:5]
+            if duplicates.exists():
+                raise serializers.ValidationError({
+                    'non_field_errors': [
+                        'A lead with this phone number or email already exists. '
+                        'Set confirm_duplicate=true to create another lead.'
+                    ],
+                    'possible_duplicates': [
+                        {'id': str(lead.id), 'customer_name': lead.customer_name}
+                        for lead in duplicates
+                    ],
+                })
         return attrs
 
 

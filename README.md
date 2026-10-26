@@ -14,6 +14,9 @@ The application has two first-class interfaces:
 - Password recovery by emailed, expiring six-digit reset code; codes are hashed, single-use, and locked after five incorrect attempts.
 - A seven-stage lead pipeline: New inquiry, Contacted, Site visit, Quotation sent, Negotiation, Won, and Lost.
 - Lead quick-add, search/filtering, assignment, editing, activity timeline, and validated lost reasons.
+- Duplicate contact warnings, CSV lead import/export, and manager bulk assignment/stage actions.
+- Won-lead customer history gathered across matching phone/email records.
+- Contacts directory grouped from visible lead records, with search and customer-history links.
 - Profile editing with optional profile photos, plus a photo-and-name assignee picker with a fallback avatar.
 - A Kanban board with desktop drag-and-drop, internally scrollable columns, and role-scoped visibility.
 - Follow-up tasks with pending, overdue, done, and cancelled states; complete, reschedule, and cancel workflows.

@@ -7,6 +7,7 @@ drifting into different business behaviour.
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from core.tenancy import is_active_member_of_business
@@ -25,6 +26,25 @@ SITE_VISIT_REMINDER_OFFSET = timedelta(hours=1)
 
 class SiteVisitAlreadyClosedError(ValueError):
     """Raised when a visit lifecycle action races with a closed visit."""
+
+
+def related_leads_for_customer(*, business, phone='', email='', exclude=None):
+    """Return this tenant's leads that appear to belong to the same customer."""
+    phone = phone.strip()
+    email = email.strip()
+    match = Q()
+    if phone:
+        match |= Q(phone__iexact=phone)
+    if email:
+        match |= Q(email__iexact=email)
+    if not match:
+        return Lead.objects.for_business(business).none()
+    queryset = Lead.objects.for_business(business).filter(match).select_related(
+        'assigned_user', 'product',
+    )
+    if exclude is not None:
+        queryset = queryset.exclude(pk=exclude.pk if hasattr(exclude, 'pk') else exclude)
+    return queryset.order_by('-updated_at', '-id')
 
 
 def record_lead_capture(*, lead, actor):

@@ -9,7 +9,11 @@
 {% block content %}
   <section class="page-heading lead-board-heading">
     <div><p class="eyebrow">{% if is_salesperson %}YOUR PIPELINE{% else %}SHARED PIPELINE{% endif %}</p><h1>{% if is_salesperson %}My leads{% else %}Leads{% endif %}</h1><p>{% if is_salesperson %}Capture the call, move the card, set the next step.{% else %}Every opportunity in {{ business.name }}, in one shared view.{% endif %}</p></div>
-    <a class="button button-dark" href="{% url 'web:lead-create' %}">Quick add <span aria-hidden="true">+</span></a>
+    <div class="page-heading-actions">
+      <a class="button button-muted" href="{% url 'web:lead-export' %}{% if request.GET.urlencode %}?{{ request.GET.urlencode }}{% endif %}">Export CSV</a>
+      {% if is_manager %}<a class="button button-muted" href="{% url 'web:lead-import' %}">Import CSV</a>{% endif %}
+      <a class="button button-dark" href="{% url 'web:lead-create' %}">Quick add <span aria-hidden="true">+</span></a>
+    </div>
   </section>
 
   <form class="lead-filter" method="get">

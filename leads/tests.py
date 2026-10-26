@@ -105,6 +105,35 @@ class LeadApiTests(APITestCase):
             created_by=self.owner,
         ).exists())
 
+    def test_api_warns_about_duplicate_contact_and_allows_confirmation(self):
+        self.client.force_authenticate(self.owner)
+
+        response = self.client.post(
+            reverse('lead-list'),
+            {
+                'customer_name': 'Ali Again',
+                'phone': self.lead.phone,
+                'email': 'ali@example.com',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('possible_duplicates', response.data)
+
+        response = self.client.post(
+            reverse('lead-list'),
+            {
+                'customer_name': 'Ali Again',
+                'phone': self.lead.phone,
+                'email': 'ali@example.com',
+                'confirm_duplicate': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
     def test_activity_api_creates_a_manual_event_and_updates_the_lead(self):
         self.client.force_authenticate(self.salesperson)
         previous_activity_at = self.lead.last_activity_at
