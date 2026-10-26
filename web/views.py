@@ -41,7 +41,7 @@ from core.password_reset import (
     reset_password,
     send_password_reset_code,
 )
-from core.email_campaigns import campaign_recipient_contacts, campaign_recipient_emails
+from core.email_campaigns import campaign_audience_summary, campaign_recipient_contacts
 from core.models import EmailCampaign, EmailCampaignAttachment, EmailCampaignRecipient, Membership, PendingRegistration, User
 from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
@@ -1066,10 +1066,11 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
                 if cleaned_filters.get('filter_assigned_user') else None,
             }
         context.update(self.common_context())
-        context['recipient_count'] = len(campaign_recipient_emails(
-            self.get_business(),
-            **filters,
-        ))
+        context['campaign_from_email'] = settings.DEFAULT_FROM_EMAIL
+        context['campaign_company_name'] = self.get_business().name
+        audience = campaign_audience_summary(self.get_business(), **filters)
+        context['recipient_count'] = audience['eligible']
+        context['audience_excluded_count'] = audience['excluded']
         return context
 
     def form_valid(self, form):
@@ -1090,6 +1091,7 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
                 form.cleaned_data.get('reply_to', ''),
                 form.cleaned_data['test_email'],
                 attachment_payloads,
+                self.get_business().name,
             )
             messages.success(self.request, f'Test email queued for {form.cleaned_data["test_email"]}.')
             return redirect('web:email-campaign-create')
@@ -1150,6 +1152,22 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
             f'recipient{("s" if len(contacts) != 1 else "")}.',
         )
         return redirect('web:email-campaign-list')
+
+
+class EmailCampaignAudienceCountView(ManagerRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        assigned_user_id = request.GET.get('filter_assigned_user', '')
+        try:
+            UUID(assigned_user_id)
+        except (TypeError, ValueError, AttributeError):
+            assigned_user_id = None
+        audience = campaign_audience_summary(
+            self.get_business(),
+            stage=request.GET.get('filter_stage', '') if request.GET.get('filter_stage') in Lead.Stage.values else '',
+            source=request.GET.get('filter_source', '') if request.GET.get('filter_source') in Lead.Source.values else '',
+            assigned_user_id=assigned_user_id,
+        )
+        return JsonResponse(audience)
 
 
 class EmailCampaignDetailView(ManagerRequiredMixin, TemplateView):

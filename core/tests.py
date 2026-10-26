@@ -36,19 +36,20 @@ class EmailCampaignMessageTests(SimpleTestCase):
     @override_settings(DEFAULT_FROM_EMAIL='Cuein <no-reply@example.com>')
     def test_campaign_message_contains_personalized_multipart_content_and_unsubscribe_headers(self):
         message, html = _message_for_recipient(
-            subject='Hello {{ customer_name }}',
-            body='Thanks for your interest, {{ customer_name }}.',
+            subject='Hello {{ customer_name }} at {{ company }}',
+            body='Thanks for your interest, {{ customer_name }} at {{ company }}.',
             html_body='<h1>Hello {{ customer_name }}</h1>',
             preheader='A quick update for you',
             email='customer@example.com',
             customer_name='Ayesha Khan',
+            company_name='North Star Solar',
             reply_to='sales@example.com',
             unsubscribe_url='https://app.example.com/email/unsubscribe/?token=abc',
         )
         message.attach_alternative(html, 'text/html')
 
-        self.assertEqual(message.subject, 'Hello Ayesha Khan')
-        self.assertIn('Thanks for your interest, Ayesha Khan.', message.body)
+        self.assertEqual(message.subject, 'Hello Ayesha Khan at North Star Solar')
+        self.assertIn('Thanks for your interest, Ayesha Khan at North Star Solar.', message.body)
         self.assertIn('<h1>Hello Ayesha Khan</h1>', html)
         self.assertEqual(message.reply_to, ['sales@example.com'])
         self.assertIn('List-Unsubscribe', message.extra_headers)

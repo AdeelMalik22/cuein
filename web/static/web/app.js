@@ -446,21 +446,30 @@
   }
 
   function setUpCampaignLivePreview() {
+    var builder = document.querySelector("[data-campaign-builder]");
     var preview = document.querySelector("[data-campaign-live-preview]");
-    if (!preview) return;
+    if (!builder || !preview) return;
 
     var subjectInput = document.getElementById("id_subject");
     var preheaderInput = document.getElementById("id_preheader");
     var bodyInput = document.getElementById("id_body");
     var htmlInput = document.getElementById("id_html_body");
+    var editor = builder.querySelector("[data-campaign-rich-editor]");
+    var bodyOutput = preview.querySelector("[data-campaign-preview-body]");
+    var plainOutput = preview.querySelector("[data-campaign-plain-preview]");
     var subjectOutput = preview.querySelector("[data-campaign-preview-subject]");
     var preheaderOutput = preview.querySelector("[data-campaign-preview-preheader]");
-    var bodyOutput = preview.querySelector("[data-campaign-preview-body]");
-    if (!subjectInput || !preheaderInput || !bodyInput || !htmlInput || !subjectOutput || !preheaderOutput || !bodyOutput) return;
+    if (!subjectInput || !preheaderInput || !bodyInput || !htmlInput || !editor || !bodyOutput || !plainOutput) return;
+
+    builder.classList.add("campaign-editor-ready");
+    bodyInput.required = false;
+    var sampleName = "Ayesha Khan";
+    var companyName = builder.dataset.companyName || "Cuein";
 
     function personalize(value) {
       return String(value || "")
-        .replace(/\{\{\s*(customer_name|name)\s*\}\}/g, "Ayesha Khan");
+        .replace(/\{\{\s*(customer_name|name)\s*\}\}/g, sampleName)
+        .replace(/\{\{\s*company\s*\}\}/g, companyName);
     }
 
     function safeHtml(value) {
@@ -481,35 +490,246 @@
       return parsed.body.innerHTML;
     }
 
-    function renderPlainText(value) {
-      bodyOutput.innerHTML = "";
+    function plainToHtml(value) {
       var paragraphs = String(value || "").trim().split(/\n\s*\n/).filter(Boolean);
-      if (!paragraphs.length) paragraphs = ["Your message will appear here."];
-      paragraphs.forEach(function (paragraph) {
-        var element = document.createElement("p");
-        paragraph.split("\n").forEach(function (line, index) {
-          if (index) element.appendChild(document.createElement("br"));
-          element.appendChild(document.createTextNode(personalize(line)));
-        });
-        bodyOutput.appendChild(element);
+      if (!paragraphs.length) return "<p><br></p>";
+      return paragraphs.map(function (paragraph) {
+        return "<p>" + paragraph.split("\n").map(function (line) {
+          var holder = document.createElement("span");
+          holder.textContent = line;
+          return holder.innerHTML;
+        }).join("<br>") + "</p>";
+      }).join("");
+    }
+
+    function plainFromEditor() {
+      return (editor.innerText || editor.textContent || "").replace(/\u00a0/g, " ").trim();
+    }
+
+    function renderPlainPreview(value, target) {
+      target.textContent = personalize(value || "Your message will appear here.") +
+        "\n\n—\nYou’re receiving this because you’re a customer of " + companyName + ".\nUnsubscribe";
+    }
+
+    function updateCounters() {
+      [[subjectInput, "subject"], [preheaderInput, "preheader"]].forEach(function (pair) {
+        var input = pair[0];
+        var counter = builder.querySelector('[data-campaign-counter="' + pair[1] + '"]');
+        if (!counter) return;
+        counter.textContent = input.value.length + " / 255";
+        counter.classList.toggle("is-near-limit", input.value.length > 225);
       });
     }
 
-    function update() {
+    function updateReview() {
+      var summary = builder.querySelector("[data-campaign-review-summary]");
+      var eligible = builder.querySelector("[data-campaign-eligible]");
+      if (!summary || !eligible) return;
+      var hasSubject = Boolean(subjectInput.value.trim());
+      var hasBody = Boolean(plainFromEditor());
+      var eligibleCount = eligible.textContent.trim();
+      summary.querySelector("strong").textContent = hasSubject && hasBody
+        ? eligibleCount + " eligible contact" + (eligibleCount === "1" ? "" : "s") + " ready"
+        : "Complete the message and audience above.";
+    }
+
+    function updatePreview() {
       subjectOutput.textContent = personalize(subjectInput.value) || "Your campaign subject";
       preheaderOutput.textContent = personalize(preheaderInput.value) || "Your preview text will appear here.";
       if (htmlInput.value.trim()) {
         bodyOutput.innerHTML = safeHtml(personalize(htmlInput.value));
-        if (!bodyOutput.textContent.trim()) renderPlainText(bodyInput.value);
       } else {
-        renderPlainText(bodyInput.value);
+        bodyOutput.innerHTML = safeHtml(personalize(plainToHtml(plainFromEditor())));
       }
+      if (!bodyOutput.textContent.trim()) bodyOutput.innerHTML = "<p>Your message will appear here.</p>";
+      renderPlainPreview(bodyInput.value || plainFromEditor(), plainOutput);
+      updateCounters();
+      updateReview();
     }
 
-    [subjectInput, preheaderInput, bodyInput, htmlInput].forEach(function (input) {
-      input.addEventListener("input", update);
+    function syncFromEditor() {
+      bodyInput.value = plainFromEditor();
+      htmlInput.value = safeHtml(editor.innerHTML);
+      updatePreview();
+    }
+
+    editor.innerHTML = htmlInput.value.trim() ? safeHtml(htmlInput.value) : plainToHtml(bodyInput.value);
+    [subjectInput, preheaderInput].forEach(function (input) {
+      input.addEventListener("input", updatePreview);
     });
-    update();
+    editor.addEventListener("input", syncFromEditor);
+    htmlInput.addEventListener("input", function () {
+      editor.innerHTML = safeHtml(htmlInput.value);
+      bodyInput.value = plainFromEditor();
+      updatePreview();
+    });
+
+    builder.querySelectorAll("[data-editor-command]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var command = button.dataset.editorCommand;
+        editor.focus();
+        if (command === "createLink" || command === "insertImage") {
+          var url = window.prompt(command === "createLink" ? "Paste the link URL" : "Paste the image URL");
+          if (!url) return;
+          document.execCommand(command, false, url);
+        } else {
+          document.execCommand(command, false, null);
+        }
+        syncFromEditor();
+      });
+    });
+
+    builder.querySelectorAll("[data-campaign-variable]").forEach(function (picker) {
+      picker.addEventListener("change", function () {
+        var value = picker.value;
+        picker.value = "";
+        if (!value) return;
+        if (picker.dataset.target === "subject") {
+          var start = subjectInput.selectionStart || subjectInput.value.length;
+          var end = subjectInput.selectionEnd || start;
+          subjectInput.value = subjectInput.value.slice(0, start) + value + subjectInput.value.slice(end);
+          subjectInput.focus();
+          subjectInput.setSelectionRange(start + value.length, start + value.length);
+          updatePreview();
+        } else {
+          editor.focus();
+          document.execCommand("insertText", false, value);
+          syncFromEditor();
+        }
+      });
+    });
+
+    function updateAudienceCount() {
+      var eligible = builder.querySelector("[data-campaign-eligible]");
+      var excluded = builder.querySelector("[data-campaign-excluded]");
+      var params = new URLSearchParams();
+      ["filter_stage", "filter_source", "filter_assigned_user"].forEach(function (name) {
+        var field = document.getElementById("id_" + name);
+        if (field && field.value) params.set(name, field.value);
+      });
+      if (eligible) eligible.textContent = "…";
+      if (excluded) excluded.textContent = "Updating eligible contacts…";
+      fetch(builder.dataset.countUrl + "?" + params.toString(), { credentials: "same-origin", headers: { "Accept": "application/json" } })
+        .then(function (response) { if (!response.ok) throw new Error("audience count failed"); return response.json(); })
+        .then(function (data) {
+          if (eligible) eligible.textContent = String(data.eligible || 0);
+          if (excluded) excluded.textContent = String(data.excluded || 0) + " excluded for opt-out or missing email.";
+          updateReview();
+        })
+        .catch(function () {
+          if (excluded) excluded.textContent = "Audience count unavailable. Filters will still be validated on submit.";
+        });
+    }
+    ["filter_stage", "filter_source", "filter_assigned_user"].forEach(function (name) {
+      var field = document.getElementById("id_" + name);
+      if (field) field.addEventListener("change", updateAudienceCount);
+    });
+
+    var deliveryButtons = builder.querySelectorAll("[data-delivery-mode]");
+    var scheduleField = builder.querySelector("[data-campaign-schedule-field]");
+    var scheduleInput = document.getElementById("id_scheduled_at");
+    function setDeliveryMode(mode) {
+      deliveryButtons.forEach(function (button) { button.classList.toggle("is-active", button.dataset.deliveryMode === mode); });
+      if (!scheduleField || !scheduleInput) return;
+      var scheduled = mode === "schedule";
+      scheduleField.hidden = !scheduled;
+      scheduleInput.disabled = !scheduled;
+      if (!scheduled) scheduleInput.value = "";
+    }
+    deliveryButtons.forEach(function (button) { button.addEventListener("click", function () { setDeliveryMode(button.dataset.deliveryMode); }); });
+    setDeliveryMode(scheduleInput && scheduleInput.value ? "schedule" : "now");
+
+    var fileInput = document.getElementById("id_attachments");
+    var dropzone = builder.querySelector("[data-campaign-dropzone]");
+    var fileList = builder.querySelector("[data-campaign-file-list]");
+    var usageLabel = builder.querySelector("[data-campaign-file-usage-label]");
+    var usageBar = builder.querySelector("[data-campaign-file-usage-bar]");
+    function bytesLabel(value) {
+      if (value < 1024 * 1024) return Math.max(1, Math.round(value / 1024)) + " KB";
+      return (value / (1024 * 1024)).toFixed(1) + " MB";
+    }
+    function renderFiles() {
+      if (!fileInput || !fileList) return;
+      var files = Array.prototype.slice.call(fileInput.files || []);
+      fileList.innerHTML = "";
+      files.forEach(function (file, index) {
+        var chip = document.createElement("div");
+        chip.className = "campaign-file-chip";
+        chip.innerHTML = "<span></span><small></small><button type=\"button\" aria-label=\"Remove attachment\">×</button>";
+        chip.querySelector("span").textContent = file.name;
+        chip.querySelector("small").textContent = bytesLabel(file.size);
+        chip.querySelector("button").addEventListener("click", function () {
+          var transfer = new DataTransfer();
+          files.forEach(function (item, itemIndex) { if (itemIndex !== index) transfer.items.add(item); });
+          fileInput.files = transfer.files;
+          renderFiles();
+        });
+        fileList.appendChild(chip);
+      });
+      var total = files.reduce(function (sum, file) { return sum + file.size; }, 0);
+      if (usageLabel) usageLabel.textContent = bytesLabel(total) + " of 25 MB used";
+      if (usageBar) usageBar.style.width = Math.min(100, (total / (25 * 1024 * 1024)) * 100) + "%";
+    }
+    if (fileInput) fileInput.addEventListener("change", renderFiles);
+    if (dropzone) {
+      ["dragenter", "dragover"].forEach(function (eventName) { dropzone.addEventListener(eventName, function (event) { event.preventDefault(); dropzone.classList.add("is-dragging"); }); });
+      ["dragleave", "drop"].forEach(function (eventName) { dropzone.addEventListener(eventName, function (event) { event.preventDefault(); dropzone.classList.remove("is-dragging"); }); });
+      dropzone.addEventListener("drop", function (event) {
+        if (!fileInput || !event.dataTransfer.files.length) return;
+        var transfer = new DataTransfer();
+        Array.prototype.slice.call(event.dataTransfer.files).forEach(function (file) { transfer.items.add(file); });
+        fileInput.files = transfer.files;
+        renderFiles();
+      });
+    }
+    renderFiles();
+
+    builder.querySelectorAll("[data-preview-tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        builder.querySelectorAll("[data-preview-tab]").forEach(function (button) { button.classList.toggle("is-active", button === tab); });
+        var mode = tab.dataset.previewTab;
+        var frame = builder.querySelector("[data-preview-frame]");
+        if (frame) frame.dataset.previewMode = mode;
+        plainOutput.hidden = mode !== "plain";
+      });
+    });
+
+    var testEmail = document.getElementById("id_test_email");
+    var draftStatus = builder.querySelector("[data-campaign-draft-status]");
+    var draftKey = "cuein.emailCampaignDraft";
+    if (testEmail) {
+      var lastTestEmail = window.localStorage.getItem("cuein.emailCampaignTestEmail");
+      if (!testEmail.value && lastTestEmail) testEmail.value = lastTestEmail;
+      testEmail.addEventListener("input", function () { window.localStorage.setItem("cuein.emailCampaignTestEmail", testEmail.value); });
+    }
+    function saveDraft() {
+      window.localStorage.setItem(draftKey, JSON.stringify({
+        subject: subjectInput.value,
+        preheader: preheaderInput.value,
+        body: bodyInput.value,
+        html: htmlInput.value,
+        replyTo: (document.getElementById("id_reply_to") || {}).value || "",
+        stage: (document.getElementById("id_filter_stage") || {}).value || "",
+        source: (document.getElementById("id_filter_source") || {}).value || "",
+        assignee: (document.getElementById("id_filter_assigned_user") || {}).value || ""
+      }));
+      if (draftStatus) { draftStatus.textContent = "Draft saved"; draftStatus.classList.add("is-saved"); }
+    }
+    var saveDraftButton = builder.querySelector("[data-save-campaign-draft]");
+    if (saveDraftButton) saveDraftButton.addEventListener("click", saveDraft);
+    builder.addEventListener("submit", function (event) {
+      syncFromEditor();
+      if (!bodyInput.value.trim()) {
+        event.preventDefault();
+        bodyInput.setCustomValidity("Add a message before sending the campaign.");
+        bodyInput.reportValidity();
+        bodyInput.setCustomValidity("");
+        return;
+      }
+      var submitter = event.submitter;
+      if (submitter && (submitter.value === "queue" || submitter.value === "test")) window.localStorage.removeItem(draftKey);
+    });
+    updatePreview();
   }
 
   // Delegate this at script-load time instead of wiring each button during

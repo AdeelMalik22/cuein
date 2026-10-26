@@ -14,7 +14,7 @@ from .models import EmailCampaign, EmailCampaignRecipient
 from leads.models import Lead
 
 
-def _personalize(value, customer_name):
+def _personalize(value, customer_name, company_name=''):
     """Support the small, safe set of merge tags offered by campaign emails."""
     return (
         (value or '')
@@ -22,6 +22,8 @@ def _personalize(value, customer_name):
         .replace('{{customer_name}}', customer_name)
         .replace('{{ name }}', customer_name)
         .replace('{{name}}', customer_name)
+        .replace('{{ company }}', company_name)
+        .replace('{{company}}', company_name)
     )
 
 
@@ -43,13 +45,14 @@ def _message_for_recipient(
     preheader,
     email,
     customer_name='',
+    company_name='',
     reply_to='',
     unsubscribe_url='',
     is_test=False,
 ):
-    personalized_subject = _personalize(subject, customer_name)
-    personalized_body = _personalize(body, customer_name)
-    personalized_html = _personalize(html_body, customer_name)
+    personalized_subject = _personalize(subject, customer_name, company_name)
+    personalized_body = _personalize(body, customer_name, company_name)
+    personalized_html = _personalize(html_body, customer_name, company_name)
     content_body = personalized_body
 
     if unsubscribe_url:
@@ -73,7 +76,7 @@ def _message_for_recipient(
     html = (
         '<!doctype html><html><body style="background:#f7f7f4;margin:0;padding:32px 16px;">'
         '<div style="display:none;max-height:0;overflow:hidden;opacity:0;">'
-        f'{escape(_personalize(preheader, customer_name))}</div>'
+        f'{escape(_personalize(preheader, customer_name, company_name))}</div>'
         '<div style="background:#ffffff;border:1px solid #e4e4df;margin:0 auto;max-width:640px;'
         'padding:34px 32px;font-family:Arial,sans-serif;">'
         f'{content_html}{footer}</div></body></html>'
@@ -154,7 +157,7 @@ def _attach_payloads(message, payloads):
 def send_email_campaign(campaign_id):
     """Deliver a campaign and persist a separate result for every recipient."""
     with transaction.atomic():
-        campaign = EmailCampaign.objects.select_for_update().get(pk=campaign_id)
+        campaign = EmailCampaign.objects.select_for_update().select_related('business').get(pk=campaign_id)
         if campaign.status not in (
             EmailCampaign.Status.QUEUED,
             EmailCampaign.Status.PARTIAL,
@@ -209,6 +212,7 @@ def send_email_campaign(campaign_id):
                         preheader=campaign.preheader,
                         email=recipient.email,
                         customer_name=recipient.customer_name,
+                        company_name=campaign.business.name,
                         reply_to=campaign.reply_to,
                         unsubscribe_url=_unsubscribe_url(campaign, recipient.email),
                     )
@@ -263,7 +267,7 @@ def send_email_campaign(campaign_id):
 
 
 @shared_task
-def send_email_campaign_test(subject, body, html_body, preheader, reply_to, test_email, attachment_payloads=None):
+def send_email_campaign_test(subject, body, html_body, preheader, reply_to, test_email, attachment_payloads=None, company_name=''):
     """Send a preview without creating a campaign or touching customer data."""
     message, html = _message_for_recipient(
         subject=subject,
@@ -271,6 +275,7 @@ def send_email_campaign_test(subject, body, html_body, preheader, reply_to, test
         html_body=html_body,
         preheader=preheader,
         email=test_email,
+        company_name=company_name,
         reply_to=reply_to,
         is_test=True,
     )
