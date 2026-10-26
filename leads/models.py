@@ -193,6 +193,7 @@ class Activity(TenantScopedModel):
         CALL = 'call', 'Call'
         SITE_VISIT = 'site_visit', 'Site visit'
         QUOTATION = 'quotation', 'Quotation'
+        EMAIL = 'email', 'Email'
         STAGE_CHANGE = 'stage_change', 'Stage change'
         SYSTEM = 'system', 'System'
 

@@ -87,6 +87,9 @@
           {% if is_manager %}<a href="{% url 'web:email-campaign-list' %}" class="nav-item {% if request.resolver_match.url_name == 'email-campaign-list' or request.resolver_match.url_name == 'email-campaign-create' %}active{% endif %}">
             <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m4 7 8 6 8-6"></path></svg><span>Email campaigns</span>
           </a>{% endif %}
+          <a href="{% url 'web:email-thread-list' %}" class="nav-item {% if request.resolver_match.url_name == 'email-thread-list' or request.resolver_match.url_name == 'email-thread-detail' %}active{% endif %}">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3V5Z"></path><path d="M8 9h8M8 12h5"></path></svg><span>Inbox</span>
+          </a>
           <a href="{% url 'web:site-visit-calendar' %}" class="nav-item {% if request.resolver_match.url_name == 'site-visit-calendar' %}active{% endif %}">
             <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4M16 3v4M4 10h16M9 14h2v2H9zM14 14h2v2h-2z"></path></svg><span>Site visits</span>
           </a>

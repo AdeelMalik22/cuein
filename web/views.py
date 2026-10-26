@@ -1,6 +1,7 @@
 import csv
 import base64
 import io
+import json
 import re
 from decimal import Decimal, InvalidOperation
 from datetime import date, datetime, time, timedelta
@@ -42,7 +43,28 @@ from core.password_reset import (
     send_password_reset_code,
 )
 from core.email_campaigns import campaign_audience_summary, campaign_recipient_contacts
-from core.models import EmailCampaign, EmailCampaignAttachment, EmailCampaignRecipient, Membership, PendingRegistration, User
+from core.mail_security import encrypt_mail_secret
+from core.mail_services import (
+    MailProviderError,
+    add_internal_note,
+    complete_mailbox_oauth,
+    create_oauth_mailbox,
+    mailbox_oauth_authorization_url,
+)
+from core.models import (
+    EmailCampaign,
+    EmailCampaignAttachment,
+    EmailCampaignRecipient,
+    EmailInternalNote,
+    EmailMessage,
+    EmailThread,
+    EmailTrackingEvent,
+    EmailUnmatched,
+    MailboxConnection,
+    Membership,
+    PendingRegistration,
+    User,
+)
 from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
 from core.security import consume_browser_auth_rate_limit
@@ -58,7 +80,7 @@ from core.tenancy import (
 from core.timezones import business_day_bounds
 from followups.models import FollowUpTask, Notification
 from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
-from core.tasks import send_email_campaign, send_email_campaign_test
+from core.tasks import send_email_campaign, send_email_campaign_test, send_mail_thread_reply, sync_mailbox
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product, SiteVisit
 from leads.services import (
@@ -84,6 +106,9 @@ from .forms import (
     LeadDetailsForm,
     LeadFollowUpForm,
     LeadImportForm,
+    MailReplyForm,
+    MailboxImapForm,
+    UnmatchedLeadForm,
     EmailCampaignForm,
     LeadQuickAddForm,
     LeadStageForm,
@@ -1017,6 +1042,443 @@ class ContactListView(TenantWebMixin, TemplateView):
             'contact_count': len(contact_list),
         })
         return context
+
+
+class MailboxListView(TenantWebMixin, TemplateView):
+    template_name = 'web/mailbox_list.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        context['mailboxes'] = MailboxConnection.objects.for_business(self.get_business()).select_related('connected_by').order_by('account_email')
+        context['thread_count'] = EmailThread.objects.for_business(self.get_business()).count()
+        return context
+
+
+class MailboxOAuthStartView(TenantWebMixin, View):
+    def get(self, request, *args, **kwargs):
+        provider = kwargs['provider']
+        if provider not in (MailboxConnection.Provider.GMAIL, MailboxConnection.Provider.MICROSOFT):
+            return HttpResponse('Unsupported mailbox provider.', status=400)
+        if provider == MailboxConnection.Provider.GMAIL and not settings.GMAIL_OAUTH_CLIENT_ID:
+            messages.error(request, 'Gmail OAuth is not configured yet.')
+            return redirect('web:mailbox-list')
+        if provider == MailboxConnection.Provider.MICROSOFT and not settings.MICROSOFT_OAUTH_CLIENT_ID:
+            messages.error(request, 'Microsoft OAuth is not configured yet.')
+            return redirect('web:mailbox-list')
+        is_shared = request.GET.get('shared') == '1'
+        if is_shared and not self.is_manager():
+            return HttpResponseForbidden('Only managers can connect a shared team mailbox.')
+        callback_path = reverse('web:mailbox-oauth-callback', kwargs={'provider': provider})
+        redirect_uri = f'{settings.MAIL_OAUTH_REDIRECT_BASE.rstrip("/")}{callback_path}'
+        state = TimestampSigner().sign_object({
+            'user_id': str(request.user.pk),
+            'business_id': str(self.get_business().pk),
+            'provider': provider,
+            'shared': is_shared,
+        })
+        try:
+            url = mailbox_oauth_authorization_url(provider, state, redirect_uri)
+        except MailProviderError as error:
+            messages.error(request, str(error))
+            return redirect('web:mailbox-list')
+        return redirect(url)
+
+
+class MailboxOAuthCallbackView(TenantWebMixin, View):
+    def get(self, request, *args, **kwargs):
+        provider = kwargs['provider']
+        try:
+            state = TimestampSigner().unsign_object(request.GET.get('state', ''), max_age=600)
+            if state['user_id'] != str(request.user.pk) or state['provider'] != provider:
+                raise BadSignature('Mailbox OAuth state does not belong to this session.')
+            if state['business_id'] != str(self.get_business().pk):
+                raise BadSignature('Mailbox OAuth workspace does not match the active workspace.')
+            code = request.GET['code']
+        except (BadSignature, SignatureExpired, KeyError, TypeError):
+            messages.error(request, 'Mailbox authorization expired. Please try again.')
+            return redirect('web:mailbox-list')
+        try:
+            callback_path = reverse('web:mailbox-oauth-callback', kwargs={'provider': provider})
+            redirect_uri = f'{settings.MAIL_OAUTH_REDIRECT_BASE.rstrip("/")}{callback_path}'
+            token_data = complete_mailbox_oauth(provider, code, redirect_uri)
+            mailbox = create_oauth_mailbox(
+                business=self.get_business(),
+                user=request.user,
+                provider=provider,
+                token_data=token_data,
+                is_shared=bool(state.get('shared')),
+            )
+            transaction.on_commit(lambda: sync_mailbox.delay(str(mailbox.pk)))
+        except MailProviderError as error:
+            messages.error(request, str(error))
+            return redirect('web:mailbox-list')
+        messages.success(request, f'{mailbox.account_email} is connected. Initial mail sync queued.')
+        return redirect('web:mailbox-list')
+
+
+class MailboxImapConnectView(TenantWebMixin, FormView):
+    template_name = 'web/mailbox_imap_form.html'
+    form_class = MailboxImapForm
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
+    def form_valid(self, form):
+        if form.cleaned_data['is_shared'] and not self.is_manager():
+            return HttpResponseForbidden('Only managers can connect a shared team mailbox.')
+        values = form.cleaned_data
+        mailbox, _created = MailboxConnection.objects.update_or_create(
+            business=self.get_business(),
+            account_email=values['account_email'].casefold(),
+            defaults={
+                'connected_by': self.request.user,
+                'provider': MailboxConnection.Provider.IMAP,
+                'display_name': values['display_name'],
+                'is_shared': values['is_shared'],
+                'status': MailboxConnection.Status.ACTIVE,
+                'imap_host': values['imap_host'],
+                'imap_port': values['imap_port'],
+                'imap_use_ssl': values['imap_use_ssl'],
+                'smtp_host': values['smtp_host'],
+                'smtp_port': values['smtp_port'],
+                'smtp_use_tls': values['smtp_use_tls'],
+                'username_secret': encrypt_mail_secret(values['username']),
+                'password_secret': encrypt_mail_secret(values['password']),
+                'backfill_days': values['backfill_days'],
+                'last_sync_error': '',
+            },
+        )
+        transaction.on_commit(lambda: sync_mailbox.delay(str(mailbox.pk)))
+        messages.success(self.request, f'{mailbox.account_email} is connected. Initial mail sync queued.')
+        return redirect('web:mailbox-list')
+
+
+class MailboxDisconnectView(TenantWebMixin, View):
+    def post(self, request, *args, **kwargs):
+        mailbox = get_object_or_404(MailboxConnection.objects.for_business(self.get_business()), pk=kwargs['pk'])
+        if mailbox.connected_by_id != request.user.pk and not self.is_manager():
+            return HttpResponseForbidden('You can only disconnect your own mailbox.')
+        if mailbox.is_shared and not self.is_manager():
+            return HttpResponseForbidden('Only managers can disconnect a shared mailbox.')
+        mailbox.status = MailboxConnection.Status.DISCONNECTED
+        mailbox.access_token_secret = ''
+        mailbox.refresh_token_secret = ''
+        mailbox.password_secret = ''
+        mailbox.save(update_fields=('status', 'access_token_secret', 'refresh_token_secret', 'password_secret', 'updated_at'))
+        messages.success(request, f'{mailbox.account_email} was disconnected.')
+        return redirect('web:mailbox-list')
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class MailboxWebhookView(View):
+    """Receive provider notifications and queue a tenant-scoped sync."""
+
+    def post(self, request, *args, **kwargs):
+        provider = kwargs['provider']
+        if provider not in (MailboxConnection.Provider.GMAIL, MailboxConnection.Provider.MICROSOFT):
+            return HttpResponse(status=404)
+        try:
+            payload = json.loads(request.body.decode('utf-8') or '{}')
+        except (TypeError, ValueError):
+            return JsonResponse({'detail': 'Invalid notification body.'}, status=400)
+        if provider == MailboxConnection.Provider.GMAIL:
+            message = payload.get('message', {})
+            data = message.get('data', '')
+            try:
+                data_payload = json.loads(base64.b64decode(data).decode('utf-8')) if data else {}
+            except (ValueError, UnicodeDecodeError):
+                data_payload = {}
+            account_email = data_payload.get('emailAddress', '').casefold()
+            mailbox = MailboxConnection.objects.filter(
+                provider=provider,
+                account_email=account_email,
+                status=MailboxConnection.Status.ACTIVE,
+            ).first()
+            if mailbox and data_payload.get('historyId'):
+                mailbox.sync_cursor = str(data_payload['historyId'])
+                mailbox.save(update_fields=('sync_cursor', 'updated_at'))
+        else:
+            if request.GET.get('validationToken'):
+                return HttpResponse(request.GET['validationToken'], content_type='text/plain')
+            notifications = payload.get('value', [])
+            mailbox = None
+            for notification in notifications:
+                subscription_id = notification.get('subscriptionId', '')
+                candidate = MailboxConnection.objects.filter(
+                    provider=provider,
+                    webhook_subscription_id=subscription_id,
+                    status=MailboxConnection.Status.ACTIVE,
+                ).first()
+                if candidate and (
+                    not candidate.webhook_verification_secret
+                    or candidate.webhook_verification_secret == notification.get('clientState')
+                ):
+                    mailbox = candidate
+                    break
+        if mailbox:
+            sync_mailbox.delay(str(mailbox.pk))
+        return JsonResponse({'queued': bool(mailbox)})
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class MailOpenTrackingView(View):
+    """Record an optional open event and return a transparent pixel."""
+
+    PIXEL = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+
+    def get(self, request, *args, **kwargs):
+        try:
+            payload = TimestampSigner().unsign_object(request.GET.get('token', ''), max_age=60 * 60 * 24 * 365)
+            message = EmailMessage.objects.filter(
+                business_id=payload['business_id'],
+                message_id=payload['message_id'],
+            ).first()
+        except (BadSignature, SignatureExpired, KeyError, TypeError):
+            message = None
+        if message:
+            EmailTrackingEvent.objects.create(
+                business_id=message.business_id,
+                message=message,
+                kind=EmailTrackingEvent.Kind.OPEN,
+            )
+            if message.status == EmailMessage.Status.SENT:
+                message.status = EmailMessage.Status.DELIVERED
+                message.save(update_fields=('status',))
+        return HttpResponse(self.PIXEL, content_type='image/gif')
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class MailClickTrackingView(View):
+    def get(self, request, *args, **kwargs):
+        target = '/'
+        try:
+            payload = TimestampSigner().unsign_object(request.GET.get('token', ''), max_age=60 * 60 * 24 * 365)
+            target = payload.get('target_url', '/')
+            message = EmailMessage.objects.filter(
+                business_id=payload['business_id'],
+                message_id=payload['message_id'],
+            ).first()
+            if message and target.startswith(('http://', 'https://')):
+                EmailTrackingEvent.objects.create(
+                    business_id=message.business_id,
+                    message=message,
+                    kind=EmailTrackingEvent.Kind.CLICK,
+                    target_url=target,
+                )
+        except (BadSignature, SignatureExpired, KeyError, TypeError):
+            target = '/'
+        return redirect(target if target.startswith(('http://', 'https://')) else '/')
+
+
+class EmailUnmatchedListView(TenantWebMixin, TemplateView):
+    template_name = 'web/email_unmatched_list.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        context['unmatched_messages'] = EmailUnmatched.objects.for_business(self.get_business()).filter(
+            status=EmailUnmatched.Status.OPEN,
+        ).select_related('message', 'mailbox').order_by('-created_at')
+        context['lead_form'] = UnmatchedLeadForm(business=self.get_business())
+        return context
+
+
+class EmailUnmatchedActionView(TenantWebMixin, View):
+    def post(self, request, *args, **kwargs):
+        unmatched = get_object_or_404(
+            EmailUnmatched.objects.for_business(self.get_business()).select_related('message'),
+            pk=kwargs['pk'],
+        )
+        action = request.POST.get('action', '')
+        if action == 'ignore':
+            unmatched.status = EmailUnmatched.Status.IGNORED
+            unmatched.save(update_fields=('status',))
+            messages.success(request, 'Message moved out of the unmatched queue.')
+        elif action == 'convert':
+            form = UnmatchedLeadForm(request.POST, business=self.get_business())
+            if not form.is_valid():
+                messages.error(request, 'Enter the customer name, phone, and owner before converting this message.')
+            else:
+                with transaction.atomic():
+                    lead = Lead.objects.create(
+                        business=self.get_business(),
+                        customer_name=form.cleaned_data['customer_name'],
+                        phone=form.cleaned_data['phone'],
+                        email=unmatched.from_email,
+                        source=Lead.Source.OTHER,
+                        stage=Lead.Stage.NEW_INQUIRY,
+                        assigned_user=form.cleaned_data['assigned_user'],
+                    )
+                    unmatched.message.thread.lead = lead
+                    unmatched.message.thread.save(update_fields=('lead', 'updated_at'))
+                    unmatched.status = EmailUnmatched.Status.CONVERTED
+                    unmatched.save(update_fields=('status',))
+                    record_lead_capture(lead=lead, actor=request.user)
+                messages.success(request, f'{lead.customer_name} was added to the CRM and matched to the thread.')
+        else:
+            return HttpResponse('Unknown unmatched message action.', status=400)
+        return redirect('web:email-unmatched-list')
+
+
+class EmailThreadListView(TenantWebMixin, ListView):
+    template_name = 'web/email_thread_list.html'
+    context_object_name = 'threads'
+    paginate_by = 25
+
+    def get_queryset(self):
+        queryset = EmailThread.objects.for_business(self.get_business()).select_related('assigned_to', 'lead').prefetch_related('messages')
+        if not self.is_manager():
+            queryset = queryset.filter(Q(assigned_to=self.request.user) | Q(assigned_to__isnull=True))
+        filter_name = self.request.GET.get('filter', 'all')
+        if filter_name == 'mine':
+            queryset = queryset.filter(assigned_to=self.request.user)
+        elif filter_name == 'unassigned':
+            queryset = queryset.filter(assigned_to__isnull=True)
+        elif filter_name == 'contact':
+            queryset = queryset.filter(lead__isnull=False)
+        elif filter_name == 'lead':
+            queryset = queryset.filter(lead__isnull=False)
+        status = self.request.GET.get('status', '')
+        if status in EmailThread.Status.values:
+            queryset = queryset.filter(status=status)
+        query = self.request.GET.get('q', '').strip()
+        if query:
+            queryset = queryset.filter(
+                Q(subject__icontains=query)
+                | Q(messages__from_email__icontains=query)
+                | Q(lead__customer_name__icontains=query)
+            ).distinct()
+        return queryset.order_by('-last_message_at', '-updated_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        context.update({
+            'active_filter': self.request.GET.get('filter', 'all'),
+            'active_status': self.request.GET.get('status', ''),
+            'search': self.request.GET.get('q', ''),
+            'assignees': users_for_business(self.get_business()).order_by('first_name', 'last_name', 'username'),
+            'mailboxes': MailboxConnection.objects.for_business(self.get_business()).filter(status=MailboxConnection.Status.ACTIVE),
+            'unmatched_count': EmailUnmatched.objects.for_business(self.get_business()).filter(status=EmailUnmatched.Status.OPEN).count(),
+        })
+        return context
+
+
+class EmailThreadDetailView(TenantWebMixin, TemplateView):
+    template_name = 'web/email_thread_detail.html'
+
+    def get_thread(self):
+        queryset = EmailThread.objects.for_business(self.get_business()).select_related('assigned_to', 'lead').prefetch_related('messages__attachments', 'internal_notes')
+        if not self.is_manager():
+            queryset = queryset.filter(Q(assigned_to=self.request.user) | Q(assigned_to__isnull=True))
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        thread = self.get_thread()
+        context.update(self.common_context())
+        context.update({
+            'thread': thread,
+            'reply_form': MailReplyForm(),
+            'thread_status_choices': EmailThread.Status.choices,
+            'assignees': users_for_business(self.get_business()).order_by('first_name', 'last_name', 'username'),
+            'mailboxes': MailboxConnection.objects.for_business(self.get_business()).filter(status=MailboxConnection.Status.ACTIVE),
+        })
+        return context
+
+
+class EmailThreadActionView(TenantWebMixin, View):
+    def get_thread(self):
+        queryset = EmailThread.objects.for_business(self.get_business())
+        if not self.is_manager():
+            queryset = queryset.filter(Q(assigned_to=self.request.user) | Q(assigned_to__isnull=True))
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
+
+    def post(self, request, *args, **kwargs):
+        thread = self.get_thread()
+        action = request.POST.get('action', '')
+        if action == 'assign':
+            if not self.is_manager():
+                return HttpResponseForbidden('Only managers can assign shared inbox threads.')
+            assigned_id = request.POST.get('assigned_to') or None
+            if assigned_id and not users_for_business(self.get_business()).filter(pk=assigned_id).exists():
+                return HttpResponseForbidden('That user does not belong to this workspace.')
+            thread.assigned_to_id = assigned_id
+            thread.save(update_fields=('assigned_to', 'updated_at'))
+            messages.success(request, 'Thread assignment updated.')
+        elif action == 'status':
+            status = request.POST.get('status')
+            if status not in EmailThread.Status.values:
+                return HttpResponse('Invalid thread status.', status=400)
+            thread.status = status
+            thread.save(update_fields=('status', 'updated_at'))
+            messages.success(request, 'Thread status updated.')
+        elif action == 'note':
+            body = request.POST.get('body', '').strip()
+            if not body:
+                messages.error(request, 'Internal note cannot be empty.')
+            else:
+                add_internal_note(thread=thread, author=request.user, body=body)
+                messages.success(request, 'Internal note added.')
+        elif action == 'remind':
+            if not thread.lead_id:
+                messages.error(request, 'A reminder needs a matched CRM lead.')
+            else:
+                try:
+                    days = max(1, min(365, int(request.POST.get('days', '3'))))
+                except ValueError:
+                    days = 3
+                assigned_user = thread.assigned_to or request.user
+                FollowUpTask.objects.update_or_create(
+                    business=self.get_business(),
+                    lead=thread.lead,
+                    rule_key=f'email_reply:{thread.pk}',
+                    defaults={
+                        'email_thread': thread,
+                        'assigned_user': assigned_user,
+                        'due_at': timezone.now() + timedelta(days=days),
+                        'description': f'Check for a reply on “{thread.subject or "email thread"}”.',
+                        'status': FollowUpTask.Status.PENDING,
+                        'completed_at': None,
+                    },
+                )
+                messages.success(request, f'Reminder set for {days} day(s) from now.')
+        elif action == 'reply':
+            form = MailReplyForm(request.POST, request.FILES)
+            if not form.is_valid():
+                messages.error(request, 'Write a reply before sending it.')
+            else:
+                mailbox_id = request.POST.get('mailbox')
+                mailboxes = MailboxConnection.objects.for_business(self.get_business()).filter(status=MailboxConnection.Status.ACTIVE)
+                mailbox = mailboxes.filter(pk=mailbox_id).first() if mailbox_id else None
+                if mailbox is None:
+                    mailbox = mailboxes.filter(Q(connected_by=request.user) | Q(is_shared=True)).first()
+                if mailbox is None:
+                    messages.error(request, 'Connect an active mailbox before replying.')
+                else:
+                    attachment_payloads = []
+                    for uploaded in form.cleaned_data.get('attachments', []):
+                        uploaded.seek(0)
+                        attachment_payloads.append({
+                            'filename': uploaded.name,
+                            'content_type': uploaded.content_type or 'application/octet-stream',
+                            'content': base64.b64encode(uploaded.read()).decode('ascii'),
+                        })
+                    transaction.on_commit(lambda: send_mail_thread_reply.delay(
+                        str(thread.pk), str(mailbox.pk), str(request.user.pk), form.cleaned_data['body'],
+                        form.cleaned_data.get('html_body', ''), form.cleaned_data.get('to_emails', []),
+                        form.cleaned_data.get('cc_emails', []), attachment_payloads,
+                    ))
+                    thread.assigned_to = request.user
+                    thread.status = EmailThread.Status.WAITING
+                    thread.save(update_fields=('assigned_to', 'status', 'updated_at'))
+                    messages.success(request, 'Reply queued through the connected mailbox.')
+        else:
+            return HttpResponse('Unknown thread action.', status=400)
+        return redirect('web:email-thread-detail', pk=thread.pk)
 
 
 class EmailCampaignListView(ManagerRequiredMixin, ListView):

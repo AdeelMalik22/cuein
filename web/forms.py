@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 from core.captcha import captcha_enabled, verify_turnstile
 from core.membership_services import update_membership
-from core.models import Business, EmailCampaign, Membership, PendingRegistration, User
+from core.models import Business, EmailCampaign, EmailThread, MailboxConnection, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
@@ -864,3 +864,63 @@ class TaskRescheduleForm(forms.Form):
         if due_at <= timezone.now():
             raise ValidationError('Choose a future time for the next action.')
         return due_at
+
+
+class MailboxImapForm(forms.Form):
+    account_email = forms.EmailField(label='Mailbox email')
+    display_name = forms.CharField(required=False, label='Display name')
+    is_shared = forms.BooleanField(required=False, label='Shared team inbox')
+    imap_host = forms.CharField(label='IMAP host')
+    imap_port = forms.IntegerField(min_value=1, max_value=65535, initial=993)
+    imap_use_ssl = forms.BooleanField(required=False, initial=True, label='Use IMAP SSL')
+    smtp_host = forms.CharField(label='SMTP host')
+    smtp_port = forms.IntegerField(min_value=1, max_value=65535, initial=587)
+    smtp_use_tls = forms.BooleanField(required=False, initial=True, label='Use SMTP TLS')
+    username = forms.CharField(label='Username')
+    password = forms.CharField(widget=forms.PasswordInput(render_value=False), label='Password')
+    backfill_days = forms.IntegerField(min_value=30, max_value=365, initial=90, label='Initial sync days')
+
+
+class MailReplyForm(forms.Form):
+    body = forms.CharField(widget=forms.Textarea(attrs={'rows': 8}), label='Reply')
+    html_body = forms.CharField(required=False, widget=forms.HiddenInput)
+    to_emails = forms.CharField(required=False, widget=forms.HiddenInput)
+    cc_emails = forms.CharField(required=False, widget=forms.HiddenInput)
+    attachments = MultipleFileField(required=False, label='Attachments')
+
+    def clean_to_emails(self):
+        values = [item.strip() for item in self.cleaned_data.get('to_emails', '').split(',') if item.strip()]
+        return values
+
+    def clean_cc_emails(self):
+        values = [item.strip() for item in self.cleaned_data.get('cc_emails', '').split(',') if item.strip()]
+        return values
+
+    def clean_attachments(self):
+        attachments = self.cleaned_data.get('attachments', [])
+        allowed_extensions = {
+            '.csv', '.doc', '.docx', '.gif', '.jpeg', '.jpg', '.json', '.pdf',
+            '.png', '.ppt', '.pptx', '.txt', '.webp', '.xls', '.xlsx', '.zip',
+        }
+        if len(attachments) > 10:
+            raise ValidationError('Attach no more than 10 files.')
+        if sum(uploaded.size for uploaded in attachments) > 25 * 1024 * 1024:
+            raise ValidationError('Attachments must be 25 MB or smaller in total.')
+        for uploaded in attachments:
+            if uploaded.size > 10 * 1024 * 1024:
+                raise ValidationError(f'{uploaded.name} is larger than the 10 MB per-file limit.')
+            if Path(uploaded.name).suffix.casefold() not in allowed_extensions:
+                raise ValidationError(f'{uploaded.name} is not a supported attachment type.')
+        return attachments
+
+
+class UnmatchedLeadForm(forms.Form):
+    customer_name = forms.CharField(max_length=255, label='Customer name')
+    phone = forms.CharField(max_length=32, label='Phone')
+    assigned_user = forms.ModelChoiceField(queryset=User.objects.none(), label='Assign to')
+
+    def __init__(self, *args, business, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['assigned_user'].queryset = users_for_business(business).order_by(
+            'first_name', 'last_name', 'username',
+        )

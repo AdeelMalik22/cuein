@@ -59,6 +59,16 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 DJANGO_SITE_URL = os.environ.get('DJANGO_SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
+MAIL_TOKEN_ENCRYPTION_KEY = os.environ.get('MAIL_TOKEN_ENCRYPTION_KEY', '')
+MAIL_OAUTH_REDIRECT_BASE = os.environ.get('MAIL_OAUTH_REDIRECT_BASE', DJANGO_SITE_URL)
+MAIL_WEBHOOK_BASE_URL = os.environ.get('MAIL_WEBHOOK_BASE_URL', DJANGO_SITE_URL)
+MAIL_TRACKING_ENABLED = os.environ.get('MAIL_TRACKING_ENABLED', 'false').lower() == 'true'
+GMAIL_OAUTH_CLIENT_ID = os.environ.get('GMAIL_OAUTH_CLIENT_ID', '')
+GMAIL_OAUTH_CLIENT_SECRET = os.environ.get('GMAIL_OAUTH_CLIENT_SECRET', '')
+GMAIL_PUBSUB_TOPIC = os.environ.get('GMAIL_PUBSUB_TOPIC', '')
+MICROSOFT_OAUTH_CLIENT_ID = os.environ.get('MICROSOFT_OAUTH_CLIENT_ID', '')
+MICROSOFT_OAUTH_CLIENT_SECRET = os.environ.get('MICROSOFT_OAUTH_CLIENT_SECRET', '')
+MICROSOFT_OAUTH_TENANT = os.environ.get('MICROSOFT_OAUTH_TENANT', 'common')
 if IS_PRODUCTION and not ALLOWED_HOSTS:
     raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS must be configured in production.')
 
@@ -376,5 +386,9 @@ CELERY_BEAT_SCHEDULE = {
     'dispatch-scheduled-email-campaigns': {
         'task': 'core.tasks.dispatch_scheduled_email_campaigns',
         'schedule': 60,
+    },
+    'sync-connected-mailboxes': {
+        'task': 'core.tasks.sync_all_mailboxes',
+        'schedule': 60 * 5,
     },
 }

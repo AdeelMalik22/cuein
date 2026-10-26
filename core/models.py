@@ -336,3 +336,218 @@ class EmailCampaignAttachment(models.Model):
 
     def __str__(self):
         return self.original_name
+
+
+class MailboxConnection(TenantScopedModel):
+    """One user's connected mailbox inside a workspace."""
+
+    class Provider(models.TextChoices):
+        GMAIL = 'gmail', 'Google / Gmail'
+        MICROSOFT = 'microsoft', 'Microsoft 365'
+        IMAP = 'imap', 'IMAP / SMTP'
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending connection'
+        ACTIVE = 'active', 'Active'
+        ERROR = 'error', 'Sync error'
+        DISCONNECTED = 'disconnected', 'Disconnected'
+
+    connected_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='mailbox_connections')
+    provider = models.CharField(max_length=16, choices=Provider.choices)
+    account_email = models.EmailField()
+    display_name = models.CharField(max_length=255, blank=True)
+    is_shared = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    provider_account_id = models.CharField(max_length=255, blank=True)
+    scopes = models.JSONField(default=list, blank=True)
+    access_token_secret = models.TextField(blank=True)
+    refresh_token_secret = models.TextField(blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    imap_host = models.CharField(max_length=255, blank=True)
+    imap_port = models.PositiveIntegerField(default=993)
+    imap_use_ssl = models.BooleanField(default=True)
+    smtp_host = models.CharField(max_length=255, blank=True)
+    smtp_port = models.PositiveIntegerField(default=587)
+    smtp_use_tls = models.BooleanField(default=True)
+    username_secret = models.TextField(blank=True)
+    password_secret = models.TextField(blank=True)
+    sync_cursor = models.TextField(blank=True)
+    webhook_subscription_id = models.CharField(max_length=255, blank=True)
+    webhook_verification_secret = models.CharField(max_length=255, blank=True)
+    webhook_expires_at = models.DateTimeField(null=True, blank=True)
+    backfill_days = models.PositiveSmallIntegerField(default=90)
+    last_sync_at = models.DateTimeField(null=True, blank=True)
+    last_sync_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('business', 'account_email'),
+                name='unique_mailbox_email_per_business',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=('business', 'status')),
+            models.Index(fields=('connected_by', 'status')),
+        ]
+
+    def __str__(self):
+        return f'{self.account_email} · {self.get_provider_display()}'
+
+
+class EmailThread(TenantScopedModel):
+    """A provider-independent conversation in the shared inbox."""
+
+    class Status(models.TextChoices):
+        OPEN = 'open', 'Open'
+        WAITING = 'waiting', 'Waiting'
+        CLOSED = 'closed', 'Closed'
+
+    class LastDirection(models.TextChoices):
+        INBOUND = 'inbound', 'Inbound'
+        OUTBOUND = 'outbound', 'Outbound'
+
+    subject = models.CharField(max_length=998, blank=True)
+    normalized_subject = models.CharField(max_length=998, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_email_threads',
+    )
+    lead = models.ForeignKey(
+        'leads.Lead',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='email_threads',
+    )
+    last_direction = models.CharField(max_length=16, choices=LastDirection.choices, blank=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_message_preview = models.TextField(blank=True)
+    message_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=('business', 'status', '-last_message_at')),
+            models.Index(fields=('business', 'assigned_to', 'status')),
+            models.Index(fields=('business', 'lead', '-last_message_at')),
+        ]
+
+    def __str__(self):
+        return self.subject or '(no subject)'
+
+
+class EmailMessage(TenantScopedModel):
+    """One inbound or outbound message, retained for threading and audit."""
+
+    class Direction(models.TextChoices):
+        INBOUND = 'inbound', 'Inbound'
+        OUTBOUND = 'outbound', 'Outbound'
+
+    class Status(models.TextChoices):
+        SENT = 'sent', 'Sent'
+        DELIVERED = 'delivered', 'Delivered'
+        REPLIED = 'replied', 'Replied'
+        BOUNCED = 'bounced', 'Bounced'
+        FAILED = 'failed', 'Failed'
+
+    thread = models.ForeignKey(EmailThread, on_delete=models.CASCADE, related_name='messages')
+    mailbox = models.ForeignKey(MailboxConnection, on_delete=models.SET_NULL, null=True, related_name='messages')
+    provider_message_id = models.CharField(max_length=512, blank=True)
+    message_id = models.CharField(max_length=998, blank=True)
+    in_reply_to = models.CharField(max_length=998, blank=True)
+    references = models.JSONField(default=list, blank=True)
+    direction = models.CharField(max_length=16, choices=Direction.choices)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.SENT)
+    from_email = models.EmailField()
+    to_emails = models.JSONField(default=list, blank=True)
+    cc_emails = models.JSONField(default=list, blank=True)
+    bcc_emails = models.JSONField(default=list, blank=True)
+    subject = models.CharField(max_length=998, blank=True)
+    text_body = models.TextField(blank=True)
+    html_body = models.TextField(blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+    raw_headers = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('mailbox', 'provider_message_id'),
+                condition=~Q(provider_message_id=''),
+                name='unique_provider_message_per_mailbox',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=('business', 'thread', '-created_at')),
+            models.Index(fields=('business', 'message_id')),
+            models.Index(fields=('business', 'from_email')),
+        ]
+
+    def __str__(self):
+        return self.subject or self.message_id or str(self.pk)
+
+
+class EmailMessageAttachment(models.Model):
+    message = models.ForeignKey(EmailMessage, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='mail_attachments/%Y/%m/')
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128, blank=True)
+    content_id = models.CharField(max_length=255, blank=True)
+    size = models.PositiveBigIntegerField(default=0)
+    is_inline = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ('id',)
+
+
+class EmailInternalNote(TenantScopedModel):
+    thread = models.ForeignKey(EmailThread, on_delete=models.CASCADE, related_name='internal_notes')
+    author = models.ForeignKey(User, on_delete=models.PROTECT, related_name='email_internal_notes')
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('created_at', 'id')
+        indexes = [models.Index(fields=('business', 'thread', 'created_at'))]
+
+
+class EmailUnmatched(TenantScopedModel):
+    """Inbound messages that need a human decision before CRM matching."""
+
+    class Status(models.TextChoices):
+        OPEN = 'open', 'Open'
+        CONVERTED = 'converted', 'Converted'
+        IGNORED = 'ignored', 'Ignored'
+
+    mailbox = models.ForeignKey(MailboxConnection, on_delete=models.CASCADE, related_name='unmatched_messages')
+    message = models.OneToOneField(EmailMessage, on_delete=models.CASCADE, related_name='unmatched')
+    from_email = models.EmailField()
+    subject = models.CharField(max_length=998, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=('business', 'status', '-created_at'))]
+
+
+class EmailTrackingEvent(TenantScopedModel):
+    class Kind(models.TextChoices):
+        OPEN = 'open', 'Open'
+        CLICK = 'click', 'Click'
+
+    message = models.ForeignKey(EmailMessage, on_delete=models.CASCADE, related_name='tracking_events')
+    kind = models.CharField(max_length=12, choices=Kind.choices)
+    target_url = models.URLField(blank=True)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=('business', 'message', 'kind', '-occurred_at'))]

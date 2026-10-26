@@ -6,6 +6,12 @@ from .models import (
     EmailCampaign,
     EmailCampaignAttachment,
     EmailCampaignRecipient,
+    EmailInternalNote,
+    EmailMessage,
+    EmailMessageAttachment,
+    EmailThread,
+    EmailUnmatched,
+    MailboxConnection,
     Membership,
     PasswordResetRequest,
     PendingRegistration,
@@ -78,3 +84,52 @@ class EmailCampaignAttachmentAdmin(admin.ModelAdmin):
     search_fields = ('original_name', 'campaign__subject')
     readonly_fields = ('original_name', 'content_type', 'size', 'created_at')
     autocomplete_fields = ('campaign',)
+
+
+@admin.register(MailboxConnection)
+class MailboxConnectionAdmin(admin.ModelAdmin):
+    list_display = ('account_email', 'business', 'provider', 'is_shared', 'status', 'last_sync_at')
+    list_filter = ('provider', 'status', 'is_shared', 'business')
+    search_fields = ('account_email', 'display_name', 'business__name')
+    readonly_fields = ('access_token_secret', 'refresh_token_secret', 'username_secret', 'password_secret', 'created_at', 'updated_at')
+    autocomplete_fields = ('business', 'connected_by')
+
+
+@admin.register(EmailThread)
+class EmailThreadAdmin(admin.ModelAdmin):
+    list_display = ('subject', 'business', 'status', 'assigned_to', 'lead', 'last_message_at')
+    list_filter = ('status', 'business')
+    search_fields = ('subject', 'messages__from_email', 'lead__customer_name')
+    autocomplete_fields = ('business', 'assigned_to', 'lead')
+
+
+@admin.register(EmailMessage)
+class EmailMessageAdmin(admin.ModelAdmin):
+    list_display = ('subject', 'from_email', 'direction', 'status', 'received_at', 'thread')
+    list_filter = ('direction', 'status', 'business')
+    search_fields = ('subject', 'from_email', 'message_id')
+    readonly_fields = ('business', 'thread', 'mailbox', 'message_id', 'provider_message_id', 'created_at')
+    autocomplete_fields = ('thread', 'mailbox')
+
+
+@admin.register(EmailMessageAttachment)
+class EmailMessageAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('filename', 'message', 'content_type', 'size')
+    search_fields = ('filename', 'message__subject')
+    readonly_fields = ('filename', 'content_type', 'size')
+    autocomplete_fields = ('message',)
+
+
+@admin.register(EmailInternalNote)
+class EmailInternalNoteAdmin(admin.ModelAdmin):
+    list_display = ('thread', 'author', 'created_at')
+    search_fields = ('body', 'thread__subject')
+    autocomplete_fields = ('business', 'thread', 'author')
+
+
+@admin.register(EmailUnmatched)
+class EmailUnmatchedAdmin(admin.ModelAdmin):
+    list_display = ('from_email', 'subject', 'business', 'status', 'created_at')
+    list_filter = ('status', 'business')
+    search_fields = ('from_email', 'subject')
+    autocomplete_fields = ('business', 'mailbox', 'message')

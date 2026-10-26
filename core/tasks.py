@@ -10,7 +10,8 @@ from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import EmailCampaign, EmailCampaignRecipient
+from .mail_services import MailProviderError, send_thread_reply, sync_mailbox as sync_mailbox_service
+from .models import EmailCampaign, EmailCampaignRecipient, EmailThread, MailboxConnection, User
 from leads.models import Lead
 
 
@@ -304,3 +305,59 @@ def dispatch_scheduled_email_campaigns():
             send_email_campaign.delay(str(campaign_id))
             queued += 1
     return {'queued': queued}
+
+
+@shared_task(bind=True, max_retries=3)
+def sync_mailbox(self, connection_id, backfill_days=None):
+    """Backfill once, then sync a mailbox incrementally with bounded retries."""
+    try:
+        connection = MailboxConnection.objects.get(pk=connection_id)
+        return {
+            'connection_id': str(connection.id),
+            'created': sync_mailbox_service(connection, backfill_days=backfill_days),
+        }
+    except MailProviderError as error:
+        MailboxConnection.objects.filter(pk=connection_id).update(
+            status=MailboxConnection.Status.ERROR,
+            last_sync_error=str(error),
+            updated_at=timezone.now(),
+        )
+        raise self.retry(exc=error, countdown=60 * (2 ** self.request.retries))
+
+
+@shared_task
+def sync_all_mailboxes():
+    """Queue active connections; each worker remains isolated per mailbox."""
+    connection_ids = list(
+        MailboxConnection.objects.filter(status=MailboxConnection.Status.ACTIVE).values_list('id', flat=True),
+    )
+    for connection_id in connection_ids:
+        sync_mailbox.delay(str(connection_id))
+    return {'queued': len(connection_ids)}
+
+
+@shared_task(bind=True, max_retries=3)
+def send_mail_thread_reply(self, thread_id, connection_id, actor_id, body, html_body='', to_emails=None, cc_emails=None, attachment_payloads=None):
+    try:
+        thread = EmailThread.objects.get(pk=thread_id)
+        connection = MailboxConnection.objects.get(pk=connection_id)
+        actor = User.objects.get(pk=actor_id)
+        message = send_thread_reply(
+            thread=thread,
+            connection=connection,
+            actor=actor,
+            body=body,
+            html_body=html_body,
+            to_emails=to_emails,
+            cc_emails=cc_emails,
+            attachments=[
+                {
+                    **payload,
+                    'content': base64.b64decode(payload['content'].encode('ascii')) if isinstance(payload.get('content'), str) else payload.get('content', b''),
+                }
+                for payload in (attachment_payloads or [])
+            ],
+        )
+        return {'message_id': str(message.id)}
+    except MailProviderError as error:
+        raise self.retry(exc=error, countdown=60 * (2 ** self.request.retries))

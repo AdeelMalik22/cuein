@@ -1,0 +1,19 @@
+{% extends 'web/base.html' %}
+{% block title %}Connect mailbox · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading mail-page-heading"><div><a class="back-link" href="{% url 'web:mailbox-list' %}"><span aria-hidden="true">←</span> Mailboxes</a><p class="eyebrow">MAILBOX CONNECTION</p><h1>Connect IMAP / SMTP</h1><p>Use a provider-issued app password or mailbox credential. Secrets are encrypted before storage.</p></div></section>
+  <form method="post" class="panel mailbox-form">{% csrf_token %}{% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}<div class="mail-form-grid">
+    <label class="field"><span>{{ form.account_email.label }}</span>{{ form.account_email }}{% for error in form.account_email.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+    <label class="field"><span>{{ form.display_name.label }}</span>{{ form.display_name }}</label>
+    <label class="field field-wide"><span>IMAP server</span>{{ form.imap_host }}{% for error in form.imap_host.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+    <label class="field"><span>{{ form.imap_port.label }}</span>{{ form.imap_port }}</label>
+    <label class="field checkbox-field">{{ form.imap_use_ssl }}<span>{{ form.imap_use_ssl.label }}</span></label>
+    <label class="field field-wide"><span>SMTP server</span>{{ form.smtp_host }}{% for error in form.smtp_host.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+    <label class="field"><span>{{ form.smtp_port.label }}</span>{{ form.smtp_port }}</label>
+    <label class="field checkbox-field">{{ form.smtp_use_tls }}<span>{{ form.smtp_use_tls.label }}</span></label>
+    <label class="field"><span>{{ form.username.label }}</span>{{ form.username }}</label>
+    <label class="field"><span>{{ form.password.label }}</span>{{ form.password }}</label>
+    <label class="field"><span>{{ form.backfill_days.label }}</span>{{ form.backfill_days }}</label>
+    <label class="field checkbox-field">{{ form.is_shared }}<span>{{ form.is_shared.label }}</span></label>
+  </div><p class="field-hint">Initial sync imports the selected number of days. Later syncs run every five minutes through Celery.</p><div class="form-actions"><a class="button button-muted" href="{% url 'web:mailbox-list' %}">Cancel</a><button class="button button-dark" type="submit">Connect and sync</button></div></form>
+{% endblock %}

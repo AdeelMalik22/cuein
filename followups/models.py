@@ -17,6 +17,13 @@ class FollowUpTask(TenantScopedModel):
         CANCELLED = 'cancelled', 'Cancelled'
 
     lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='follow_up_tasks')
+    email_thread = models.ForeignKey(
+        'core.EmailThread',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='follow_up_tasks',
+    )
     assigned_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='follow_up_tasks')
     due_at = models.DateTimeField()
     description = models.TextField()
@@ -42,6 +49,8 @@ class FollowUpTask(TenantScopedModel):
         errors = {}
         if self.business_id and self.lead_id and self.lead.business_id != self.business_id:
             errors['lead'] = 'The lead must belong to the same business.'
+        if self.business_id and self.email_thread_id and self.email_thread.business_id != self.business_id:
+            errors['email_thread'] = 'The email thread must belong to the same business.'
         if self.business_id and self.assigned_user_id and not belongs_to_business(
             self.assigned_user_id,
             self.business_id,
