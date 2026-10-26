@@ -9198,9 +9198,16 @@ body.campaign-reference-page .campaign-reference-topbar {
     font-size: .64rem;
 }
 
+.campaign-reference-review .campaign-review-status {
+    background: #fafaf8;
+    border: 1px solid #e5e5e1;
+    border-radius: .55rem;
+    padding: .75rem .85rem;
+}
+
 .campaign-reference-actions .campaign-draft-status {
     border-left: 1px solid var(--line);
-    margin: 0 .15rem 0 0;
+    margin: 0 auto 0 0;
     padding-left: .75rem;
 }
 
