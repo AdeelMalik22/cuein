@@ -3,7 +3,7 @@
 {% block content %}
   <section class="page-heading">
     <div><p class="eyebrow">CUSTOMER DIRECTORY</p><h1>Contacts</h1><p>{{ contact_count }} customer{{ contact_count|pluralize }} from your visible leads.</p></div>
-    <a class="button button-dark" href="{% url 'web:lead-create' %}">Add a lead <span aria-hidden="true">+</span></a>
+    <a class="button button-dark" href="{% url 'web:lead-create' %}">Add contact <span aria-hidden="true">+</span></a>
   </section>
 
   <form class="lead-filter" method="get">
@@ -28,7 +28,7 @@
               <td><time>{{ contact.last_activity_at|timesince }} ago</time></td>
             </tr>
           {% empty %}
-            <tr><td colspan="7" class="stage-list-empty">No contacts match this search.</td></tr>
+            <tr><td colspan="7" class="stage-list-empty">No contacts match this search. <a href="{% url 'web:lead-create' %}">Add your first contact</a>.</td></tr>
           {% endfor %}
         </tbody>
       </table>

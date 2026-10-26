@@ -1251,5 +1251,6 @@ class LeadManagementToolsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Returning Customer')
+        self.assertContains(response, 'Add contact')
         self.assertContains(response, '>2<')
         self.assertContains(response, reverse('web:customer-history', args=[first.pk]))
