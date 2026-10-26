@@ -337,7 +337,7 @@ def sync_all_mailboxes():
 
 
 @shared_task(bind=True, max_retries=3)
-def send_mail_thread_reply(self, thread_id, connection_id, actor_id, body, html_body='', to_emails=None, cc_emails=None, attachment_payloads=None):
+def send_mail_thread_reply(self, thread_id, connection_id, actor_id, body, html_body='', to_emails=None, cc_emails=None, attachment_payloads=None, subject=''):
     try:
         thread = EmailThread.objects.get(pk=thread_id)
         connection = MailboxConnection.objects.get(pk=connection_id)
@@ -357,6 +357,7 @@ def send_mail_thread_reply(self, thread_id, connection_id, actor_id, body, html_
                 }
                 for payload in (attachment_payloads or [])
             ],
+            subject=subject,
         )
         return {'message_id': str(message.id)}
     except MailProviderError as error:

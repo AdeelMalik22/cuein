@@ -61,6 +61,7 @@ from core.models import (
     EmailTrackingEvent,
     EmailUnmatched,
     MailboxConnection,
+    MailTemplate,
     Membership,
     PendingRegistration,
     User,
@@ -108,6 +109,7 @@ from .forms import (
     LeadImportForm,
     MailReplyForm,
     MailboxImapForm,
+    MailTemplateForm,
     UnmatchedLeadForm,
     EmailCampaignForm,
     LeadQuickAddForm,
@@ -1044,6 +1046,37 @@ class ContactListView(TenantWebMixin, TemplateView):
         return context
 
 
+class MailTemplateListView(ManagerRequiredMixin, ListView):
+    template_name = 'web/mail_template_list.html'
+    context_object_name = 'mail_templates'
+
+    def get_queryset(self):
+        return MailTemplate.objects.for_business(self.get_business()).filter(is_active=True).select_related('created_by').order_by('name')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
+
+class MailTemplateCreateView(ManagerRequiredMixin, FormView):
+    template_name = 'web/mail_template_form.html'
+    form_class = MailTemplateForm
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
+    def form_valid(self, form):
+        template = form.save(commit=False)
+        template.business = self.get_business()
+        template.created_by = self.request.user
+        template.save()
+        messages.success(self.request, f'Template “{template.name}” created.')
+        return redirect('web:mail-template-list')
+
+
 class MailboxListView(TenantWebMixin, TemplateView):
     template_name = 'web/mailbox_list.html'
 
@@ -1147,6 +1180,9 @@ class MailboxImapConnectView(TenantWebMixin, FormView):
                 'smtp_use_tls': values['smtp_use_tls'],
                 'username_secret': encrypt_mail_secret(values['username']),
                 'password_secret': encrypt_mail_secret(values['password']),
+                'signature': values['signature'],
+                'hidden_domains': [item.strip().casefold() for item in values['hidden_domains'].split(',') if item.strip()],
+                'hidden_labels': [item.strip().casefold() for item in values['hidden_labels'].split(',') if item.strip()],
                 'backfill_days': values['backfill_days'],
                 'last_sync_error': '',
             },
@@ -1386,6 +1422,7 @@ class EmailThreadDetailView(TenantWebMixin, TemplateView):
             'thread_status_choices': EmailThread.Status.choices,
             'assignees': users_for_business(self.get_business()).order_by('first_name', 'last_name', 'username'),
             'mailboxes': MailboxConnection.objects.for_business(self.get_business()).filter(status=MailboxConnection.Status.ACTIVE),
+            'mail_templates': MailTemplate.objects.for_business(self.get_business()).filter(is_active=True).order_by('name'),
         })
         return context
 
@@ -1459,6 +1496,17 @@ class EmailThreadActionView(TenantWebMixin, View):
                 if mailbox is None:
                     messages.error(request, 'Connect an active mailbox before replying.')
                 else:
+                    template = None
+                    template_id = request.POST.get('template_id')
+                    if template_id:
+                        template = MailTemplate.objects.filter(
+                            business=self.get_business(), is_active=True, pk=template_id,
+                        ).first()
+                    reply_body = form.cleaned_data.get('body', '').strip() or (template.body if template else '')
+                    if not reply_body:
+                        messages.error(request, 'Write a reply or choose a template before sending it.')
+                        return redirect('web:email-thread-detail', pk=thread.pk)
+                    reply_html = form.cleaned_data.get('html_body', '') or (template.html_body if template else '')
                     attachment_payloads = []
                     for uploaded in form.cleaned_data.get('attachments', []):
                         uploaded.seek(0)
@@ -1468,9 +1516,10 @@ class EmailThreadActionView(TenantWebMixin, View):
                             'content': base64.b64encode(uploaded.read()).decode('ascii'),
                         })
                     transaction.on_commit(lambda: send_mail_thread_reply.delay(
-                        str(thread.pk), str(mailbox.pk), str(request.user.pk), form.cleaned_data['body'],
-                        form.cleaned_data.get('html_body', ''), form.cleaned_data.get('to_emails', []),
+                        str(thread.pk), str(mailbox.pk), str(request.user.pk), reply_body,
+                        reply_html, form.cleaned_data.get('to_emails', []),
                         form.cleaned_data.get('cc_emails', []), attachment_payloads,
+                        template.subject if template else '',
                     ))
                     thread.assigned_to = request.user
                     thread.status = EmailThread.Status.WAITING

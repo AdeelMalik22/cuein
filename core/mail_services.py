@@ -570,6 +570,16 @@ def sync_mailbox(connection, *, backfill_days=None):
         raise MailProviderError('Unsupported mailbox provider.')
     created = 0
     for provider_message_id, payload in messages:
+        sender_domain = payload.get('from_email', '').rsplit('@', 1)[-1].casefold()
+        hidden_domains = {str(value).strip().lstrip('@').casefold() for value in (connection.hidden_domains or [])}
+        hidden_labels = {str(value).strip().casefold() for value in (connection.hidden_labels or [])}
+        message_labels = {
+            label.strip().casefold()
+            for label in str(payload.get('raw_headers', {}).get('x-gmail-label', '')).split(',')
+            if label.strip()
+        }
+        if sender_domain in hidden_domains or hidden_labels.intersection(message_labels):
+            continue
         _message, was_created = ingest_message(
             connection=connection,
             provider_message_id=provider_message_id,
@@ -696,7 +706,18 @@ def _send_smtp(connection, mime_message):
 
 
 @transaction.atomic
-def send_thread_reply(*, thread, connection, actor, body, html_body='', to_emails=None, cc_emails=None, attachments=None):
+def _personalize_reply(value, *, thread, company_name):
+    customer_name = thread.lead.customer_name if thread.lead_id else ''
+    return (
+        (value or '')
+        .replace('{{ customer_name }}', customer_name)
+        .replace('{{customer_name}}', customer_name)
+        .replace('{{ company }}', company_name)
+        .replace('{{company}}', company_name)
+    )
+
+
+def send_thread_reply(*, thread, connection, actor, body, html_body='', subject='', to_emails=None, cc_emails=None, attachments=None):
     """Send a reply through the connected provider and persist the audit row."""
     if thread.business_id != connection.business_id or connection.status != MailboxConnection.Status.ACTIVE:
         raise MailProviderError('The mailbox and thread must belong to the active workspace.')
@@ -706,10 +727,18 @@ def send_thread_reply(*, thread, connection, actor, body, html_body='', to_email
         recipients = [previous.from_email] if previous and previous.direction == EmailMessage.Direction.INBOUND else []
     if not recipients:
         raise MailProviderError('This thread has no reply recipient.')
+    body = _personalize_reply(body, thread=thread, company_name=thread.business.name)
+    html_body = _personalize_reply(html_body, thread=thread, company_name=thread.business.name)
+    if connection.signature:
+        signature = _personalize_reply(connection.signature, thread=thread, company_name=thread.business.name)
+        body = f'{body.rstrip()}\n\n--\n{signature}'
+        if html_body:
+            html_body = f'{html_body}<p>--<br>{signature.replace(chr(10), "<br>")}</p>'
+    subject = _personalize_reply(subject, thread=thread, company_name=thread.business.name)
     mime_message = _mime_for_reply(
         connection=connection,
         thread=thread,
-        subject=thread.subject if thread.subject.lower().startswith('re:') else f'Re: {thread.subject}',
+        subject=subject or (thread.subject if thread.subject.lower().startswith('re:') else f'Re: {thread.subject}'),
         body=body,
         html_body=html_body,
         to_emails=recipients,

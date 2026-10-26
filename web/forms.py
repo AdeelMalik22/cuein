@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 from core.captcha import captcha_enabled, verify_turnstile
 from core.membership_services import update_membership
-from core.models import Business, EmailCampaign, EmailThread, MailboxConnection, Membership, PendingRegistration, User
+from core.models import Business, EmailCampaign, EmailThread, MailTemplate, MailboxConnection, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
@@ -878,11 +878,14 @@ class MailboxImapForm(forms.Form):
     smtp_use_tls = forms.BooleanField(required=False, initial=True, label='Use SMTP TLS')
     username = forms.CharField(label='Username')
     password = forms.CharField(widget=forms.PasswordInput(render_value=False), label='Password')
+    signature = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 4}), label='Signature')
+    hidden_domains = forms.CharField(required=False, label='Hide domains', help_text='Comma-separated domains to keep out of the CRM.')
+    hidden_labels = forms.CharField(required=False, label='Hide labels', help_text='Comma-separated provider labels to exclude.')
     backfill_days = forms.IntegerField(min_value=30, max_value=365, initial=90, label='Initial sync days')
 
 
 class MailReplyForm(forms.Form):
-    body = forms.CharField(widget=forms.Textarea(attrs={'rows': 8}), label='Reply')
+    body = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 8}), label='Reply')
     html_body = forms.CharField(required=False, widget=forms.HiddenInput)
     to_emails = forms.CharField(required=False, widget=forms.HiddenInput)
     cc_emails = forms.CharField(required=False, widget=forms.HiddenInput)
@@ -924,3 +927,13 @@ class UnmatchedLeadForm(forms.Form):
         self.fields['assigned_user'].queryset = users_for_business(business).order_by(
             'first_name', 'last_name', 'username',
         )
+
+
+class MailTemplateForm(forms.ModelForm):
+    class Meta:
+        model = MailTemplate
+        fields = ('name', 'subject', 'body', 'html_body')
+        widgets = {
+            'body': forms.Textarea(attrs={'rows': 10}),
+            'html_body': forms.Textarea(attrs={'rows': 6}),
+        }

@@ -13,6 +13,9 @@
     <label class="field checkbox-field">{{ form.smtp_use_tls }}<span>{{ form.smtp_use_tls.label }}</span></label>
     <label class="field"><span>{{ form.username.label }}</span>{{ form.username }}</label>
     <label class="field"><span>{{ form.password.label }}</span>{{ form.password }}</label>
+    <label class="field field-wide"><span>{{ form.signature.label }}</span>{{ form.signature }}<small class="field-hint">Supports customer_name and company variables.</small></label>
+    <label class="field"><span>{{ form.hidden_domains.label }}</span>{{ form.hidden_domains }}<small class="field-hint">{{ form.hidden_domains.help_text }}</small></label>
+    <label class="field"><span>{{ form.hidden_labels.label }}</span>{{ form.hidden_labels }}<small class="field-hint">{{ form.hidden_labels.help_text }}</small></label>
     <label class="field"><span>{{ form.backfill_days.label }}</span>{{ form.backfill_days }}</label>
     <label class="field checkbox-field">{{ form.is_shared }}<span>{{ form.is_shared.label }}</span></label>
   </div><p class="field-hint">Initial sync imports the selected number of days. Later syncs run every five minutes through Celery.</p><div class="form-actions"><a class="button button-muted" href="{% url 'web:mailbox-list' %}">Cancel</a><button class="button button-dark" type="submit">Connect and sync</button></div></form>

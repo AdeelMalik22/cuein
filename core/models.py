@@ -371,6 +371,9 @@ class MailboxConnection(TenantScopedModel):
     smtp_use_tls = models.BooleanField(default=True)
     username_secret = models.TextField(blank=True)
     password_secret = models.TextField(blank=True)
+    signature = models.TextField(blank=True)
+    hidden_domains = models.JSONField(default=list, blank=True)
+    hidden_labels = models.JSONField(default=list, blank=True)
     sync_cursor = models.TextField(blank=True)
     webhook_subscription_id = models.CharField(max_length=255, blank=True)
     webhook_verification_secret = models.CharField(max_length=255, blank=True)
@@ -395,6 +398,26 @@ class MailboxConnection(TenantScopedModel):
 
     def __str__(self):
         return f'{self.account_email} · {self.get_provider_display()}'
+
+
+class MailTemplate(TenantScopedModel):
+    name = models.CharField(max_length=160)
+    subject = models.CharField(max_length=998, blank=True)
+    body = models.TextField()
+    html_body = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='mail_templates')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=('business', 'name'), name='unique_mail_template_name_per_business'),
+        ]
+        indexes = [models.Index(fields=('business', 'is_active', 'name'))]
+
+    def __str__(self):
+        return self.name
 
 
 class EmailThread(TenantScopedModel):

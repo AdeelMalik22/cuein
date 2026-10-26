@@ -3,7 +3,7 @@
 {% block content %}
   <section class="page-heading mail-page-heading">
     <div><p class="eyebrow">CONNECTED MAIL</p><h1>Mailboxes</h1><p>Connect personal or shared accounts to sync conversations into Cuein.</p></div>
-    <div class="page-heading-actions"><a class="button button-muted" href="{% url 'web:email-thread-list' %}">Open inbox</a><a class="button button-dark" href="{% url 'web:mailbox-imap-connect' %}">Connect IMAP / SMTP</a></div>
+    <div class="page-heading-actions"><a class="button button-muted" href="{% url 'web:mail-template-list' %}">Mail templates</a><a class="button button-muted" href="{% url 'web:email-thread-list' %}">Open inbox</a><a class="button button-dark" href="{% url 'web:mailbox-imap-connect' %}">Connect IMAP / SMTP</a></div>
   </section>
   <section class="mail-connect-options">
     <div class="panel mail-connect-card"><div class="mail-provider-mark mail-provider-google">G</div><div><h2>Google / Gmail</h2><p>OAuth connection with Gmail API, Sent-folder sync, and threaded replies.</p></div><a class="button button-muted" href="{% url 'web:mailbox-oauth-start' provider='gmail' %}">Connect Gmail</a>{% if is_manager %}<a class="mail-shared-link" href="{% url 'web:mailbox-oauth-start' provider='gmail' %}?shared=1">Connect shared address</a>{% endif %}</div>

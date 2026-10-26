@@ -9852,6 +9852,69 @@ body.campaign-reference-page .campaign-reference-topbar {
     max-width: 250px;
 }
 
+.mail-composer-selects {
+    display: flex;
+    gap: .45rem;
+}
+
+.mail-composer-selects select {
+    min-width: 150px;
+}
+
+.mail-template-panel {
+    padding: 1rem 1.25rem;
+}
+
+.mail-template-list {
+    display: grid;
+}
+
+.mail-template-row {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .85rem 0;
+}
+
+.mail-template-row:last-child {
+    border-bottom: 0;
+}
+
+.mail-template-row strong,
+.mail-template-row p,
+.mail-template-row small {
+    display: block;
+}
+
+.mail-template-row strong {
+    font-size: .78rem;
+}
+
+.mail-template-row p,
+.mail-template-row small {
+    color: var(--muted);
+    font-size: .66rem;
+    margin-top: .15rem;
+}
+
+@media (max-width: 620px) {
+    .mail-composer-selects {
+        flex-direction: column;
+    }
+
+    .mail-composer-selects select {
+        max-width: none;
+        width: 100%;
+    }
+
+    .mail-template-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
 .mail-reply-composer textarea {
     margin-top: .65rem;
     min-height: 150px;

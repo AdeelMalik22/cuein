@@ -1,0 +1,6 @@
+{% extends 'web/base.html' %}
+{% block title %}Mail templates · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading mail-page-heading"><div><a class="back-link" href="{% url 'web:mailbox-list' %}"><span aria-hidden="true">←</span> Mailboxes</a><p class="eyebrow">REPLY TOOLS</p><h1>Mail templates</h1><p>Reusable replies with customer and company variables.</p></div><a class="button button-dark" href="{% url 'web:mail-template-create' %}">New template</a></section>
+  <section class="panel mail-template-panel">{% if mail_templates %}<div class="mail-template-list">{% for template in mail_templates %}<div class="mail-template-row"><div><strong>{{ template.name }}</strong><p>{% if template.subject %}{{ template.subject }} · {% endif %}{{ template.body|truncatechars:120 }}</p></div><small>Created by {{ template.created_by.get_full_name|default:template.created_by.username }}</small></div>{% endfor %}</div>{% else %}<div class="empty-state"><strong>No templates yet</strong><p>Create one for common follow-ups, quotes, or appointment reminders.</p><a class="button button-muted" href="{% url 'web:mail-template-create' %}">Create template</a></div>{% endif %}</section>
+{% endblock %}
