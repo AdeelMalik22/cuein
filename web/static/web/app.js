@@ -516,8 +516,9 @@
         var input = pair[0];
         var counter = builder.querySelector('[data-campaign-counter="' + pair[1] + '"]');
         if (!counter) return;
-        counter.textContent = input.value.length + " / 255";
-        counter.classList.toggle("is-near-limit", input.value.length > 225);
+        var limit = Number(counter.dataset.campaignCounterLimit || 255);
+        counter.textContent = input.value.length + " / " + limit;
+        counter.classList.toggle("is-near-limit", input.value.length > limit * .9);
       });
     }
 
@@ -527,13 +528,32 @@
       if (!summary || !eligible) return;
       var hasSubject = Boolean(subjectInput.value.trim());
       var hasBody = Boolean(plainFromEditor());
-      var eligibleCount = eligible.textContent.trim();
+      var eligibleCount = (eligible.textContent.match(/\d+/) || ["0"])[0];
       var reviewCopy = summary.querySelector("[data-review-copy]") || summary.querySelector("strong");
       var reviewDetail = summary.querySelector("[data-review-detail]");
-      if (reviewCopy) reviewCopy.textContent = "4  Review";
+      if (reviewCopy) reviewCopy.textContent = hasSubject && hasBody ? "Ready to send" : "Review your campaign";
       if (reviewDetail) reviewDetail.textContent = hasSubject && hasBody
         ? eligibleCount + " eligible contact" + (eligibleCount === "1" ? "" : "s") + " ready to queue"
         : "Complete the message before queueing";
+    }
+
+    function updateCampaignSummary() {
+      var summary = builder.querySelector("[data-campaign-summary]");
+      if (!summary) return;
+      var count = (builder.querySelector("[data-campaign-eligible]") || {}).textContent || "0";
+      var countValue = (count.match(/\d+/) || ["0"])[0];
+      var summaryCount = summary.querySelector("[data-campaign-summary-count]");
+      var reply = summary.querySelector("[data-campaign-summary-reply]");
+      var schedule = summary.querySelector("[data-campaign-summary-schedule]");
+      var attachments = summary.querySelector("[data-campaign-summary-attachments]");
+      var complete = summary.querySelector("[data-campaign-summary-complete]");
+      var replyInput = document.getElementById("id_reply_to");
+      var files = fileInput ? Array.prototype.slice.call(fileInput.files || []) : [];
+      if (summaryCount) summaryCount.textContent = countValue;
+      if (reply) reply.textContent = replyInput && replyInput.value.trim() ? replyInput.value.trim() : "Not set";
+      if (schedule) schedule.textContent = scheduleInput && scheduleInput.value ? scheduleInput.value.replace("T", " ") : "Send now";
+      if (attachments) attachments.textContent = files.length + " file" + (files.length === 1 ? "" : "s");
+      if (complete) complete.classList.toggle("is-complete", Boolean(subjectInput.value.trim() && plainFromEditor()));
     }
 
     function updatePreview() {
@@ -548,6 +568,7 @@
       renderPlainPreview(bodyInput.value || plainFromEditor(), plainOutput);
       updateCounters();
       updateReview();
+      updateCampaignSummary();
     }
 
     function syncFromEditor() {
@@ -628,18 +649,59 @@
       if (field) field.addEventListener("change", updateAudienceCount);
     });
 
+    builder.querySelectorAll("[data-campaign-chip-group]").forEach(function (group) {
+      var field = document.getElementById("id_" + group.dataset.target);
+      if (!field) return;
+      function syncChipState() {
+        group.querySelectorAll("[data-filter-value]").forEach(function (button) {
+          button.classList.toggle("is-active", button.dataset.filterValue === field.value || (!field.value && button.dataset.filterValue === ""));
+        });
+      }
+      group.querySelectorAll("[data-filter-value]").forEach(function (button) {
+        button.addEventListener("click", function () {
+          field.value = button.dataset.filterValue;
+          syncChipState();
+          field.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+      });
+      field.addEventListener("change", syncChipState);
+      syncChipState();
+    });
+
     var deliveryButtons = builder.querySelectorAll("[data-delivery-mode]");
     var scheduleField = builder.querySelector("[data-campaign-schedule-field]");
     var scheduleInput = document.getElementById("id_scheduled_at");
+    var scheduleParts = builder.querySelector("[data-campaign-schedule-parts]");
+    var scheduleDate = builder.querySelector("[data-campaign-schedule-date]");
+    var scheduleTime = builder.querySelector("[data-campaign-schedule-time]");
+    function loadScheduleParts() {
+      if (!scheduleInput || !scheduleDate || !scheduleTime || !scheduleInput.value) return;
+      var parts = scheduleInput.value.split("T");
+      scheduleDate.value = parts[0] || "";
+      scheduleTime.value = (parts[1] || "").slice(0, 5);
+    }
+    function syncScheduleField() {
+      if (!scheduleInput || !scheduleDate || !scheduleTime) return;
+      scheduleInput.value = scheduleDate.value && scheduleTime.value ? scheduleDate.value + "T" + scheduleTime.value : "";
+      updateCampaignSummary();
+    }
     function setDeliveryMode(mode) {
       deliveryButtons.forEach(function (button) { button.classList.toggle("is-active", button.dataset.deliveryMode === mode); });
       if (!scheduleField || !scheduleInput) return;
       var scheduled = mode === "schedule";
       scheduleField.hidden = !scheduled;
       scheduleInput.disabled = !scheduled;
-      if (!scheduled) scheduleInput.value = "";
+      if (scheduleParts) scheduleParts.hidden = !scheduled;
+      if (!scheduled) {
+        scheduleInput.value = "";
+        if (scheduleDate) scheduleDate.value = "";
+        if (scheduleTime) scheduleTime.value = "";
+      }
+      updateCampaignSummary();
     }
     deliveryButtons.forEach(function (button) { button.addEventListener("click", function () { setDeliveryMode(button.dataset.deliveryMode); }); });
+    [scheduleDate, scheduleTime].forEach(function (input) { if (input) input.addEventListener("change", syncScheduleField); });
+    loadScheduleParts();
     setDeliveryMode(scheduleInput && scheduleInput.value ? "schedule" : "now");
 
     var fileInput = document.getElementById("id_attachments");
@@ -672,6 +734,7 @@
       var total = files.reduce(function (sum, file) { return sum + file.size; }, 0);
       if (usageLabel) usageLabel.textContent = bytesLabel(total) + " of 25 MB used";
       if (usageBar) usageBar.style.width = Math.min(100, (total / (25 * 1024 * 1024)) * 100) + "%";
+      updateCampaignSummary();
     }
     if (fileInput) fileInput.addEventListener("change", renderFiles);
     if (dropzone) {
@@ -705,6 +768,8 @@
       if (!testEmail.value && lastTestEmail) testEmail.value = lastTestEmail;
       testEmail.addEventListener("input", function () { window.localStorage.setItem("cuein.emailCampaignTestEmail", testEmail.value); });
     }
+    var replyToInput = document.getElementById("id_reply_to");
+    if (replyToInput) replyToInput.addEventListener("input", updateCampaignSummary);
     function saveDraft() {
       window.localStorage.setItem(draftKey, JSON.stringify({
         subject: subjectInput.value,

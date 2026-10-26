@@ -1,79 +1,97 @@
 {% extends 'web/base.html' %}
 {% block title %}New email campaign · Cuein{% endblock %}
-{% block content %}
-  <section class="page-heading campaign-page-heading campaign-page-heading-clean">
-    <div>
-      <a class="back-link" href="{% url 'web:email-campaign-list' %}"><span aria-hidden="true">←</span> Campaigns</a>
-      <div class="campaign-title-row"><h1>New email campaign</h1><span class="campaign-draft-badge">Draft</span></div>
-      <p>Reach the right customers with a message your team can stand behind.</p>
+{% block body_class %}campaign-reference-page{% endblock %}
+
+{% block workspace_topbar %}
+  <header class="topbar campaign-reference-topbar">
+    <div class="campaign-breadcrumb"><span>Email campaigns</span><b>/</b><strong>New campaign</strong></div>
+    <div class="campaign-topbar-actions">
+      <span class="campaign-save-indicator"><i aria-hidden="true"></i>Draft saved · 2 min ago</span>
+      <details class="topbar-user-menu">
+        <summary class="topbar-user" aria-label="Open account menu">
+          {% include 'web/components/profile_avatar.html' with avatar_user=request.user avatar_class='avatar topbar-avatar' %}
+          <span class="topbar-user-copy"><strong>{{ request.user.get_full_name|default:request.user.username }}</strong><small>{{ active_membership.get_role_display }}</small></span>
+          <svg class="topbar-user-chevron" aria-hidden="true" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"></path></svg>
+        </summary>
+        <div class="account-menu-panel">
+          <a class="account-menu-action" href="{% url 'web:account-settings-profile' %}"><span><strong>Settings</strong><small>Profile and security</small></span></a>
+          {% if is_owner %}<a class="account-menu-action" href="{% url 'web:business-settings' %}"><span><strong>Workspace settings</strong><small>Manage {{ business.name }}</small></span></a>{% endif %}
+          <form method="post" action="{% url 'web:logout' %}">{% csrf_token %}<button class="account-menu-action account-menu-logout" type="submit"><span><strong>Log out</strong><small>End this secure session</small></span></button></form>
+        </div>
+      </details>
     </div>
+    {% if messages %}<div class="flash-stack" aria-live="polite">{% for message in messages %}<div class="flash-message {{ message.tags }}" data-flash-message role="status"><span class="flash-message-copy">{{ message }}</span><button class="flash-dismiss" type="button" data-flash-dismiss aria-label="Dismiss notification">×</button></div>{% endfor %}</div>{% endif %}
+  </header>
+{% endblock %}
+
+{% block content %}
+  <section class="campaign-reference-heading">
+    <div><p class="eyebrow">CUSTOMER OUTREACH</p><h1>New email campaign</h1><p>Write once, reach the right customers, and see exactly what happened.</p></div>
+    <nav class="campaign-step-nav" aria-label="Campaign steps"><a href="#campaign-message">Message</a><span>—</span><a href="#campaign-audience">Audience</a><span>—</span><a href="#campaign-delivery">Delivery</a><span>—</span><a href="#campaign-review">Review</a></nav>
   </section>
 
-  <form method="post" enctype="multipart/form-data" class="campaign-compose-form campaign-builder campaign-builder-clean" data-campaign-builder data-count-url="{% url 'web:email-campaign-audience-count' %}" data-company-name="{{ campaign_company_name }}">
+  <form method="post" enctype="multipart/form-data" class="campaign-reference-form campaign-builder" data-campaign-builder data-count-url="{% url 'web:email-campaign-audience-count' %}" data-company-name="{{ campaign_company_name }}">
     {% csrf_token %}
     {% if form.non_field_errors %}<div class="form-errors campaign-form-error">{{ form.non_field_errors }}</div>{% endif %}
 
-    <main class="campaign-editor-column">
-      <section class="campaign-surface campaign-message-surface">
-        <header class="campaign-surface-header"><div class="campaign-surface-title"><span class="campaign-step-label">1</span><div><p class="eyebrow">MESSAGE</p><h2>Compose your email</h2></div></div><span class="campaign-surface-caption">All fields save with the campaign</span></header>
+    <main class="campaign-reference-editor">
+      <section class="campaign-reference-section campaign-reference-message" id="campaign-message">
+        <header class="campaign-reference-section-heading"><div><span class="campaign-reference-step">1</span><h2>Message</h2></div><span>Required fields marked <b>*</b></span></header>
 
-        <div class="campaign-field campaign-subject-field"><div class="campaign-label-row"><span>{{ form.subject.label }} <b aria-hidden="true">*</b></span><span class="campaign-field-meta-inline" data-campaign-counter="subject">0 / 255</span></div><div class="campaign-input-with-action">{{ form.subject }}<select class="campaign-variable-picker" data-campaign-variable data-target="subject" aria-label="Insert subject variable"><option value="">Insert variable</option><option value="&#123;&#123; customer_name &#125;&#125;">Customer name</option><option value="&#123;&#123; company &#125;&#125;">Company</option></select></div>{% for error in form.subject.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</div>
+        <div class="campaign-reference-field campaign-subject-field"><div class="campaign-reference-label-row"><label for="id_subject">Subject <b>*</b></label><span data-campaign-counter="subject" data-campaign-counter-limit="60">0 / 60</span></div><div class="campaign-input-with-action">{{ form.subject }}<select class="campaign-variable-picker" data-campaign-variable data-target="subject" aria-label="Insert subject variable"><option value="">Insert variable</option><option value="&#123;&#123; customer_name &#125;&#125;">Customer name</option><option value="&#123;&#123; company &#125;&#125;">Company</option></select></div>{% for error in form.subject.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</div>
 
-        <label class="campaign-field"><span>{{ form.preheader.label }}</span>{{ form.preheader }}<div class="campaign-field-meta"><small>Inbox preview text</small><span data-campaign-counter="preheader">0 / 255</span></div>{% for error in form.preheader.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <label class="campaign-reference-field"><span>{{ form.preheader.label }}</span>{{ form.preheader }}<div class="campaign-reference-help"><small>Shown beside the subject in most inboxes.</small><span data-campaign-counter="preheader" data-campaign-counter-limit="100">0 / 100</span></div>{% for error in form.preheader.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
 
-        <div class="campaign-field campaign-body-field">
-          <div class="campaign-label-row"><span>Message <b aria-hidden="true">*</b></span><select class="campaign-variable-picker" data-campaign-variable data-target="editor" aria-label="Insert message variable"><option value="">Insert variable</option><option value="&#123;&#123; customer_name &#125;&#125;">Customer name</option><option value="&#123;&#123; company &#125;&#125;">Company</option></select></div>
-          <div class="campaign-editor-shell">
-            <div class="campaign-editor-toolbar" role="toolbar" aria-label="Message formatting"><button type="button" data-editor-command="bold" title="Bold"><strong>B</strong></button><button type="button" data-editor-command="italic" title="Italic"><em>I</em></button><button type="button" data-editor-command="createLink" title="Add link">↗</button><button type="button" data-editor-command="insertUnorderedList" title="Bulleted list">•</button><button type="button" data-editor-command="insertImage" title="Add image URL">▧</button><span></span><small>Rich text</small></div>
+        <div class="campaign-reference-field campaign-reference-body-field">
+          <div class="campaign-reference-label-row"><span>Body <b>*</b></span><select class="campaign-variable-picker" data-campaign-variable data-target="editor" aria-label="Insert message variable"><option value="">Variables: customer_name ▾</option><option value="&#123;&#123; customer_name &#125;&#125;">Customer name</option><option value="&#123;&#123; company &#125;&#125;">Company</option></select></div>
+          <div class="campaign-reference-editor-shell">
+            <div class="campaign-editor-toolbar campaign-reference-toolbar" role="toolbar" aria-label="Message formatting"><button type="button" data-editor-command="bold" title="Bold"><strong>B</strong></button><button type="button" data-editor-command="italic" title="Italic"><em>I</em></button><button type="button" data-editor-command="underline" title="Underline"><u>U</u></button><i aria-hidden="true"></i><button type="button" data-editor-command="justifyLeft" title="Align left">≡</button><button type="button" data-editor-command="createLink" title="Add link">↗</button><button type="button" data-editor-command="insertImage" title="Add image">▧</button></div>
             <div class="campaign-rich-editor" contenteditable="true" data-campaign-rich-editor role="textbox" aria-multiline="true" aria-label="Campaign message"></div>
             <div class="campaign-fallback-editor">{{ form.body }}</div>
           </div>
-          <div class="campaign-body-hint"><span>Plain text is generated automatically.</span><span>Use <code>&#123;&#123; customer_name &#125;&#125;</code> or <code>&#123;&#123; company &#125;&#125;</code></span></div>
+          <small class="campaign-reference-help">A plain-text version is generated automatically.</small>
           {% for error in form.body.errors %}<small class="form-error">{{ error }}</small>{% endfor %}
         </div>
 
-        <details class="campaign-advanced campaign-advanced-clean">
-          <summary><span>Advanced message options</span><small>HTML override · Reply-to · Attachments</small></summary>
-          <div class="campaign-advanced-grid">
-            <label class="campaign-field campaign-field-wide"><span>{{ form.html_body.label }}</span>{{ form.html_body }}<small class="field-hint">The editor keeps this HTML version in sync.</small>{% for error in form.html_body.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
-            <label class="campaign-field"><span>{{ form.reply_to.label }}</span>{{ form.reply_to }}{% for error in form.reply_to.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
-            <div class="campaign-field campaign-field-wide campaign-attachment-field"><span>{{ form.attachments.label }}</span><label class="campaign-dropzone" data-campaign-dropzone for="id_attachments"><span class="campaign-dropzone-icon" aria-hidden="true">＋</span><span><strong>Drop files or browse</strong><small>PDF, Office, CSV, TXT, ZIP, and images · 25 MB total</small></span>{{ form.attachments }}</label><div class="campaign-file-list" data-campaign-file-list></div><div class="campaign-usage"><span data-campaign-file-usage-label>0 MB of 25 MB used</span><i><b data-campaign-file-usage-bar></b></i></div>{% for error in form.attachments.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</div>
-          </div>
-        </details>
+        <div class="campaign-reference-field campaign-attachment-field"><div class="campaign-reference-label-row"><span>{{ form.attachments.label }}</span><span data-campaign-file-usage-label>0 MB of 25 MB</span></div><label class="campaign-dropzone campaign-reference-dropzone" data-campaign-dropzone for="id_attachments"><span class="campaign-dropzone-icon" aria-hidden="true">↑</span><strong>Drag files here or <u>browse</u></strong><small>Up to 10 files · 10 MB each · PDF, Office, CSV, ZIP, images</small>{{ form.attachments }}</label><div class="campaign-file-list" data-campaign-file-list></div><div class="campaign-usage"><i><b data-campaign-file-usage-bar></b></i></div>{% for error in form.attachments.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</div>
+
+        <details class="campaign-reference-advanced"><summary><strong>Advanced options</strong><span>Reply-to address · custom HTML</span></summary><div class="campaign-advanced-grid"><label class="campaign-reference-field campaign-field-wide"><span>{{ form.html_body.label }}</span>{{ form.html_body }}{% for error in form.html_body.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label><label class="campaign-reference-field"><span>{{ form.reply_to.label }}</span>{{ form.reply_to }}{% for error in form.reply_to.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label></div></details>
+      </section>
+
+      <section class="campaign-reference-section" id="campaign-audience">
+        <header class="campaign-reference-section-heading"><div><span class="campaign-reference-step">2</span><h2>Audience</h2></div><span>Optional filters</span></header>
+        <div class="campaign-reference-filter"><span>Stage</span><div class="campaign-chip-group" data-campaign-chip-group data-target="filter_stage">{% for value,label in form.filter_stage.field.choices %}<button type="button" data-filter-value="{{ value }}">{{ label }}</button>{% endfor %}</div><div class="campaign-hidden-field">{{ form.filter_stage }}</div></div>
+        <div class="campaign-reference-filter"><span>Source</span><div class="campaign-chip-group" data-campaign-chip-group data-target="filter_source">{% for value,label in form.filter_source.field.choices %}<button type="button" data-filter-value="{{ value }}">{{ label }}</button>{% endfor %}</div><div class="campaign-hidden-field">{{ form.filter_source }}</div></div>
+        <div class="campaign-reference-filter campaign-assignee-filter"><span>Assigned salesperson</span><div class="campaign-reference-select">{{ form.filter_assigned_user }}</div></div>
+        {% for field in form %}{% if field.name == 'filter_stage' or field.name == 'filter_source' or field.name == 'filter_assigned_user' %}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}{% endif %}{% endfor %}
+        <div class="campaign-reference-audience-count"><strong data-campaign-eligible>{{ recipient_count }} eligible</strong><span>·</span><span data-campaign-excluded>{{ audience_excluded_count }} excluded (opted out / no email)</span><a href="{% url 'web:contact-list' %}">View recipients</a></div>
+      </section>
+
+      <section class="campaign-reference-section campaign-reference-delivery" id="campaign-delivery">
+        <header class="campaign-reference-section-heading"><div><span class="campaign-reference-step">3</span><h2>Delivery</h2></div></header>
+        <div class="campaign-reference-delivery-toggle"><div class="campaign-segmented" data-campaign-delivery-toggle><button type="button" class="is-active" data-delivery-mode="now">Send now</button><button type="button" data-delivery-mode="schedule">Schedule</button></div></div>
+        <div class="campaign-reference-schedule" data-campaign-schedule-parts hidden><label><span>Date</span><input type="date" data-campaign-schedule-date></label><label><span>Time</span><input type="time" data-campaign-schedule-time></label></div>
+        <label class="campaign-reference-hidden-schedule" data-campaign-schedule-field hidden><span>{{ form.scheduled_at.label }}</span>{{ form.scheduled_at }}{% for error in form.scheduled_at.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <small class="campaign-reference-timezone">Workspace time zone: {{ business.timezone }}</small>
+        <div class="campaign-reference-test"><div><label for="id_test_email">Send a test email</label><small>Recommended</small></div><div><div class="campaign-test-row">{{ form.test_email }}<button class="button button-muted" type="submit" name="action" value="test">Send test</button></div>{% for error in form.test_email.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</div></div>
+        <p class="campaign-delivery-note" data-campaign-delivery-note>Queued immediately after you confirm. Delivery runs in the background.</p>
       </section>
     </main>
 
-    <aside class="campaign-compose-sidebar campaign-rail-clean">
-      <section class="campaign-rail-surface campaign-audience-clean" data-campaign-audience>
-        <div class="campaign-rail-heading"><div><span class="campaign-step-label">2</span><div><p class="eyebrow">AUDIENCE</p><h2>Choose recipients</h2></div></div><a href="{% url 'web:contact-list' %}">View recipients ↗</a></div>
-        <div class="campaign-audience-number"><strong data-campaign-eligible>{{ recipient_count }}</strong><span>eligible contacts</span></div>
-        <p data-campaign-excluded>{{ audience_excluded_count }} excluded for opt-out or missing email.</p>
-        <div class="campaign-filter-stack"><div class="campaign-chip-filter"><span>Stage</span>{{ form.filter_stage }}</div><div class="campaign-chip-filter"><span>Source</span>{{ form.filter_source }}</div><div class="campaign-chip-filter"><span>Salesperson</span>{{ form.filter_assigned_user }}</div></div>
+    <aside class="campaign-reference-rail">
+      <section class="campaign-reference-summary" id="campaign-review" data-campaign-summary>
+        <p class="eyebrow">CAMPAIGN SUMMARY</p>
+        <div class="campaign-summary-count"><strong data-campaign-summary-count>{{ recipient_count }}</strong><span>opted-in recipients</span></div>
+        <dl><div><dt>From</dt><dd>{{ campaign_from_email }}</dd></div><div><dt>Reply-to</dt><dd data-campaign-summary-reply>Not set</dd></div><div><dt>Schedule</dt><dd data-campaign-summary-schedule>Send now</dd></div><div><dt>Attachments</dt><dd data-campaign-summary-attachments>0 files</dd></div></dl>
+        <ul class="campaign-summary-checks"><li class="is-complete"><i>✓</i>Audience selected</li><li class="is-complete"><i>✓</i>Unsubscribe link included</li><li data-campaign-summary-complete><i>✓</i>Subject and body complete</li><li><i></i>Test email sent</li></ul>
       </section>
 
-      <section class="campaign-rail-surface campaign-delivery-clean">
-        <div class="campaign-rail-heading"><div><span class="campaign-step-label">3</span><div><p class="eyebrow">DELIVERY</p><h2>Send timing</h2></div></div></div>
-        <div class="campaign-segmented" data-campaign-delivery-toggle><button type="button" class="is-active" data-delivery-mode="now">Send now</button><button type="button" data-delivery-mode="schedule">Schedule</button></div>
-        <label class="campaign-field campaign-schedule-field" data-campaign-schedule-field hidden><span>{{ form.scheduled_at.label }}</span>{{ form.scheduled_at }}<small class="field-hint">Workspace timezone: {{ business.timezone }}</small>{% for error in form.scheduled_at.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
-        <p class="campaign-delivery-note" data-campaign-delivery-note>It will be queued immediately and sent in the background.</p>
-      </section>
-
-      <section class="campaign-rail-surface campaign-test-clean">
-        <div class="campaign-rail-heading"><div><p class="eyebrow">TEST EMAIL</p><h2>Check before sending</h2></div></div>
-        <label class="campaign-field"><span>{{ form.test_email.label }}</span>{{ form.test_email }}<small class="field-hint">Your last test address is remembered here.</small>{% for error in form.test_email.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
-      </section>
-
-      <section class="campaign-rail-surface campaign-preview-clean" data-campaign-live-preview aria-label="Live email preview">
-        <div class="campaign-rail-heading"><div><p class="eyebrow">LIVE PREVIEW</p><h2>Inbox experience</h2></div><span class="campaign-preview-sample">Ayesha Khan</span></div>
-        <div class="campaign-preview-tabs" role="tablist" aria-label="Preview mode"><button type="button" class="is-active" data-preview-tab="desktop" role="tab">Desktop</button><button type="button" data-preview-tab="mobile" role="tab">Mobile</button><button type="button" data-preview-tab="plain" role="tab">Plain text</button></div>
-        <div class="campaign-preview-frame" data-preview-frame data-preview-mode="desktop">
-          <div class="campaign-inbox-preview"><small>Inbox preview</small><strong data-campaign-preview-subject>Your campaign subject</strong><span data-campaign-preview-preheader>Your preview text will appear here.</span></div>
-          <div class="campaign-email-preview" data-campaign-html-preview><div class="campaign-email-preview-top"><span class="campaign-preview-brand">c</span><span><strong>Cuein</strong><small>from {{ campaign_from_email }} · to Ayesha Khan</small></span></div><div class="campaign-preview-body" data-campaign-preview-body><p>Your message will appear here.</p></div><div class="campaign-preview-footer">You’re receiving this because you’re a customer of {{ campaign_company_name }}. <a href="#">Unsubscribe</a></div></div>
-          <pre class="campaign-plain-preview" data-campaign-plain-preview hidden>Your message will appear here.</pre>
-        </div>
+      <section class="campaign-reference-preview" data-campaign-live-preview aria-label="Live email preview">
+        <div class="campaign-reference-preview-heading"><p class="eyebrow">LIVE PREVIEW</p><div class="campaign-preview-tabs" role="tablist" aria-label="Preview mode"><button type="button" class="is-active" data-preview-tab="desktop" role="tab">Desktop</button><button type="button" data-preview-tab="mobile" role="tab">Mobile</button><button type="button" data-preview-tab="plain" role="tab">Text</button></div></div>
+        <div class="campaign-preview-frame" data-preview-frame data-preview-mode="desktop"><div class="campaign-inbox-preview"><strong data-campaign-preview-subject>Your campaign subject</strong><span data-campaign-preview-preheader>Your preview text will appear here.</span></div><div class="campaign-email-preview" data-campaign-html-preview><div class="campaign-email-preview-top"><span class="campaign-preview-brand">S</span><span><strong>{{ campaign_company_name }}</strong><small>to Ayesha Khan</small></span></div><div class="campaign-preview-body" data-campaign-preview-body><p>Your message will appear here.</p></div><div class="campaign-preview-footer">Sample contact. Live emails include a secure <a href="#">unsubscribe link</a>.</div></div><pre class="campaign-plain-preview" data-campaign-plain-preview hidden>Your message will appear here.</pre></div>
       </section>
     </aside>
 
-    <div class="campaign-form-actions campaign-sticky-bar campaign-sticky-bar-clean"><div class="campaign-review-inline" data-campaign-review-summary><strong data-review-copy>4&nbsp; Review</strong><span data-review-detail>Complete the message before queueing</span></div><span class="campaign-draft-status" data-campaign-draft-status aria-live="polite">Not saved</span><a class="button button-muted" href="{% url 'web:email-campaign-list' %}">Cancel</a><button class="button button-muted" type="button" data-save-campaign-draft>Save draft</button><button class="button button-muted" type="submit" name="action" value="test">Send test</button><button class="button button-dark" type="submit" name="action" value="queue">Queue campaign <span aria-hidden="true">→</span></button></div>
+    <div class="campaign-reference-actions campaign-sticky-bar" data-campaign-review-summary><span class="campaign-review-status"><strong data-review-copy>Ready when you are</strong><small data-review-detail>Save a draft or queue this campaign.</small></span><span class="campaign-draft-status" data-campaign-draft-status aria-live="polite">Not saved</span><a class="button button-muted" href="{% url 'web:email-campaign-list' %}">Cancel</a><button class="button button-muted" type="button" data-save-campaign-draft>Save draft</button><button class="button button-muted" type="submit" name="action" value="test">Send test email</button><button class="button button-dark" type="submit" name="action" value="queue">Queue campaign</button></div>
   </form>
 {% endblock %}
