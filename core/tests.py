@@ -6,7 +6,7 @@ from django.contrib.auth.hashers import make_password
 from django.core import mail
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -18,6 +18,7 @@ from .email_verification import EmailVerificationCooldownError, send_email_verif
 from .membership_services import LastActiveOwnerError, remove_membership
 from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
 from .password_reset import PasswordResetCooldownError, send_password_reset_code
+from .tasks import _message_for_recipient
 
 
 PUBLIC_AUTH_THROTTLE_TEST_RATES = {
@@ -29,6 +30,29 @@ PUBLIC_AUTH_THROTTLE_TEST_RATES = {
     'auth_token': '2/minute',
     'auth_token_refresh': '2/minute',
 }
+
+
+class EmailCampaignMessageTests(SimpleTestCase):
+    @override_settings(DEFAULT_FROM_EMAIL='Cuein <no-reply@example.com>')
+    def test_campaign_message_contains_personalized_multipart_content_and_unsubscribe_headers(self):
+        message, html = _message_for_recipient(
+            subject='Hello {{ customer_name }}',
+            body='Thanks for your interest, {{ customer_name }}.',
+            html_body='<h1>Hello {{ customer_name }}</h1>',
+            preheader='A quick update for you',
+            email='customer@example.com',
+            customer_name='Ayesha Khan',
+            reply_to='sales@example.com',
+            unsubscribe_url='https://app.example.com/email/unsubscribe/?token=abc',
+        )
+        message.attach_alternative(html, 'text/html')
+
+        self.assertEqual(message.subject, 'Hello Ayesha Khan')
+        self.assertIn('Thanks for your interest, Ayesha Khan.', message.body)
+        self.assertIn('<h1>Hello Ayesha Khan</h1>', html)
+        self.assertEqual(message.reply_to, ['sales@example.com'])
+        self.assertIn('List-Unsubscribe', message.extra_headers)
+        self.assertEqual(message.alternatives[0][1], 'text/html')
 
 
 class CurrentUserApiTests(APITestCase):

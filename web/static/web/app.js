@@ -445,6 +445,73 @@
     document.querySelectorAll("[data-salesperson-report]").forEach(bindReport);
   }
 
+  function setUpCampaignLivePreview() {
+    var preview = document.querySelector("[data-campaign-live-preview]");
+    if (!preview) return;
+
+    var subjectInput = document.getElementById("id_subject");
+    var preheaderInput = document.getElementById("id_preheader");
+    var bodyInput = document.getElementById("id_body");
+    var htmlInput = document.getElementById("id_html_body");
+    var subjectOutput = preview.querySelector("[data-campaign-preview-subject]");
+    var preheaderOutput = preview.querySelector("[data-campaign-preview-preheader]");
+    var bodyOutput = preview.querySelector("[data-campaign-preview-body]");
+    if (!subjectInput || !preheaderInput || !bodyInput || !htmlInput || !subjectOutput || !preheaderOutput || !bodyOutput) return;
+
+    function personalize(value) {
+      return String(value || "")
+        .replace(/\{\{\s*(customer_name|name)\s*\}\}/g, "Ayesha Khan");
+    }
+
+    function safeHtml(value) {
+      var parsed = new DOMParser().parseFromString(value, "text/html");
+      parsed.querySelectorAll("script, iframe, object, embed, form, link, meta").forEach(function (element) {
+        element.remove();
+      });
+      parsed.querySelectorAll("*").forEach(function (element) {
+        Array.prototype.slice.call(element.attributes).forEach(function (attribute) {
+          var name = attribute.name.toLowerCase();
+          var value = attribute.value.trim().toLowerCase();
+          if (name.indexOf("on") === 0) element.removeAttribute(attribute.name);
+          if ((name === "href" || name === "src") && !/^(https?:|mailto:|#|\/)/.test(value)) {
+            element.removeAttribute(attribute.name);
+          }
+        });
+      });
+      return parsed.body.innerHTML;
+    }
+
+    function renderPlainText(value) {
+      bodyOutput.innerHTML = "";
+      var paragraphs = String(value || "").trim().split(/\n\s*\n/).filter(Boolean);
+      if (!paragraphs.length) paragraphs = ["Your message will appear here."];
+      paragraphs.forEach(function (paragraph) {
+        var element = document.createElement("p");
+        paragraph.split("\n").forEach(function (line, index) {
+          if (index) element.appendChild(document.createElement("br"));
+          element.appendChild(document.createTextNode(personalize(line)));
+        });
+        bodyOutput.appendChild(element);
+      });
+    }
+
+    function update() {
+      subjectOutput.textContent = personalize(subjectInput.value) || "Your campaign subject";
+      preheaderOutput.textContent = personalize(preheaderInput.value) || "Your preview text will appear here.";
+      if (htmlInput.value.trim()) {
+        bodyOutput.innerHTML = safeHtml(personalize(htmlInput.value));
+        if (!bodyOutput.textContent.trim()) renderPlainText(bodyInput.value);
+      } else {
+        renderPlainText(bodyInput.value);
+      }
+    }
+
+    [subjectInput, preheaderInput, bodyInput, htmlInput].forEach(function (input) {
+      input.addEventListener("input", update);
+    });
+    update();
+  }
+
   // Delegate this at script-load time instead of wiring each button during
   // page setup. A toast can then always be dismissed even if another optional
   // enhancement on the page fails to initialize.
@@ -587,6 +654,7 @@
     setUpAssigneeDropdowns();
     setUpLeadTrendTooltips();
     setUpSalespersonReportLoadMore();
+    setUpCampaignLivePreview();
     setUpLiveClocks();
     setUpDashboardGreetings();
     setUpSidebarToggle();

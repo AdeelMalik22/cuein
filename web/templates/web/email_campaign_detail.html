@@ -2,7 +2,7 @@
 {% block title %}{{ campaign.subject }} · Email campaigns · Cuein{% endblock %}
 {% block content %}
   <section class="page-heading">
-    <div><a class="back-link" href="{% url 'web:email-campaign-list' %}"><span aria-hidden="true">←</span> Back to campaigns</a><p class="eyebrow">CAMPAIGN REPORT</p><h1>{{ campaign.subject }}</h1><p>{{ campaign.get_status_display }} · Created {{ campaign.created_at|date:'M j, Y · g:i A' }}</p></div>
+    <div><a class="back-link" href="{% url 'web:email-campaign-list' %}"><span aria-hidden="true">←</span> Back to campaigns</a><p class="eyebrow">CAMPAIGN REPORT</p><h1>{{ campaign.subject }}</h1><p><span class="campaign-status campaign-status-{{ campaign.status }}">{{ campaign.get_status_display }}</span> · Created {{ campaign.created_at|date:'M j, Y · g:i A' }}</p></div>
     {% if campaign.status == 'partial' or campaign.status == 'failed' %}<form method="post" action="{% url 'web:email-campaign-retry' campaign.pk %}">{% csrf_token %}<button class="button button-dark" type="submit">Retry failed recipients <span aria-hidden="true">↻</span></button></form>{% endif %}
   </section>
 
@@ -10,7 +10,7 @@
     <article class="panel management-list-panel">
       <p class="eyebrow">DELIVERY SUMMARY</p>
       <h2>{{ campaign.sent_count }} of {{ campaign.recipient_count }} sent</h2>
-      <p class="panel-intro">{{ campaign.failed_count }} failed · {{ campaign.status|capfirst }}{% if campaign.scheduled_at %} · Scheduled {{ campaign.scheduled_at|date:'M j, Y · g:i A' }}{% endif %}</p>
+      <p class="panel-intro">{{ campaign.failed_count }} failed · {{ campaign.suppressed_count }} excluded · {{ campaign.status|capfirst }}{% if campaign.scheduled_at %} · Scheduled {{ campaign.scheduled_at|date:'M j, Y · g:i A' }}{% endif %}</p>
       {% if campaign.error_message %}<div class="form-errors">{{ campaign.error_message }}</div>{% endif %}
       <dl class="detail-list">
         <div><dt>Subject</dt><dd>{{ campaign.subject }}</dd></div>

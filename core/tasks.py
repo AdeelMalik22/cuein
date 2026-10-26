@@ -10,6 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .models import EmailCampaign, EmailCampaignRecipient
+from leads.models import Lead
 
 
 def _personalize(value, customer_name):
@@ -93,7 +94,10 @@ def _message_for_recipient(
 
 
 def _ensure_recipient_records(campaign):
-    existing = set(campaign.recipients.values_list('email', flat=True))
+    existing = {
+        email.casefold()
+        for email in campaign.recipients.values_list('email', flat=True)
+    }
     missing = []
     for item in campaign.recipient_emails or []:
         if isinstance(item, dict):
@@ -102,11 +106,12 @@ def _ensure_recipient_records(campaign):
         else:
             email = str(item).strip()
             customer_name = ''
-        if email and email not in existing:
-            existing.add(email)
+        normalized_email = email.casefold()
+        if normalized_email and normalized_email not in existing:
+            existing.add(normalized_email)
             missing.append(EmailCampaignRecipient(
                 campaign=campaign,
-                email=email,
+                email=normalized_email,
                 customer_name=customer_name,
             ))
     if missing:
@@ -150,6 +155,23 @@ def send_email_campaign(campaign_id):
         status__in=(EmailCampaignRecipient.Status.QUEUED, EmailCampaignRecipient.Status.FAILED),
     ).order_by('created_at', 'id'))
 
+    opted_in_emails = {
+        email.casefold()
+        for email in Lead.objects.filter(
+            business_id=campaign.business_id,
+            email_marketing_opt_out=False,
+        ).exclude(email='').values_list('email', flat=True).iterator()
+    }
+    still_eligible = []
+    for recipient in pending:
+        if recipient.email.casefold() in opted_in_emails:
+            still_eligible.append(recipient)
+            continue
+        recipient.status = EmailCampaignRecipient.Status.SUPPRESSED
+        recipient.error_message = 'Excluded because the customer opted out before delivery.'
+        recipient.save(update_fields=('status', 'error_message'))
+    pending = still_eligible
+
     connection_error = ''
     try:
         with get_connection() as connection:
@@ -189,8 +211,9 @@ def send_email_campaign(campaign_id):
 
     sent_count = recipients.filter(status=EmailCampaignRecipient.Status.SENT).count()
     failed_count = recipients.filter(status=EmailCampaignRecipient.Status.FAILED).count()
+    suppressed_count = recipients.filter(status=EmailCampaignRecipient.Status.SUPPRESSED).count()
     total_count = recipients.count()
-    if failed_count == 0 and sent_count == total_count:
+    if failed_count == 0 and sent_count + suppressed_count == total_count:
         status = EmailCampaign.Status.SENT
         error_message = ''
     elif sent_count:
@@ -205,6 +228,7 @@ def send_email_campaign(campaign_id):
         status=status,
         sent_count=sent_count,
         failed_count=failed_count,
+        suppressed_count=suppressed_count,
         error_message=error_message,
         sent_at=completed_at if sent_count else None,
         completed_at=completed_at,

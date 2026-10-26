@@ -1110,6 +1110,7 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
                 filter_assigned_user=form.cleaned_data.get('filter_assigned_user'),
                 recipient_emails=[contact['email'] for contact in contacts],
                 recipient_count=len(contacts),
+                suppressed_count=0,
                 status=status,
                 created_by=self.request.user,
                 scheduled_at=scheduled_at,
@@ -1117,7 +1118,7 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
             EmailCampaignRecipient.objects.bulk_create([
                 EmailCampaignRecipient(
                     campaign=campaign,
-                    email=contact['email'],
+                    email=contact['email'].strip().casefold(),
                     customer_name=contact['customer_name'],
                 )
                 for contact in contacts
@@ -1167,12 +1168,13 @@ class EmailCampaignRetryView(ManagerRequiredMixin, View):
             messages.error(request, 'Only partially sent or failed campaigns can be retried.')
             return redirect('web:email-campaign-detail', campaign.pk)
 
-        campaign.status = EmailCampaign.Status.QUEUED
-        campaign.error_message = ''
-        campaign.completed_at = None
-        campaign.sent_at = None
-        campaign.save(update_fields=('status', 'error_message', 'completed_at', 'sent_at'))
-        send_email_campaign.delay(str(campaign.pk))
+        with transaction.atomic():
+            campaign.status = EmailCampaign.Status.QUEUED
+            campaign.error_message = ''
+            campaign.completed_at = None
+            campaign.sent_at = None
+            campaign.save(update_fields=('status', 'error_message', 'completed_at', 'sent_at'))
+            transaction.on_commit(lambda: send_email_campaign.delay(str(campaign.pk)))
         messages.success(request, 'Failed recipients were queued for another attempt.')
         return redirect('web:email-campaign-detail', campaign.pk)
 

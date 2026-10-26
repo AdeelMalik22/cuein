@@ -275,6 +275,12 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'true').lower() == 'true'
 EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'false').lower() == 'true'
 EMAIL_TIMEOUT = int(os.environ.get('EMAIL_TIMEOUT', '10'))
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    raise ImproperlyConfigured('EMAIL_USE_TLS and EMAIL_USE_SSL cannot both be enabled.')
+if IS_PRODUCTION and EMAIL_BACKEND == 'django.core.mail.backends.smtp.EmailBackend' and not EMAIL_HOST:
+    raise ImproperlyConfigured('EMAIL_HOST must be configured for production SMTP delivery.')
+if IS_PRODUCTION and not DJANGO_SITE_URL.startswith('https://'):
+    raise ImproperlyConfigured('DJANGO_SITE_URL must use HTTPS in production.')
 EMAIL_VERIFICATION_TIMEOUT = int(os.environ.get('EMAIL_VERIFICATION_TIMEOUT', str(24 * 60 * 60)))
 EMAIL_VERIFICATION_RESEND_COOLDOWN = int(os.environ.get('EMAIL_VERIFICATION_RESEND_COOLDOWN', '60'))
 # Password-reset codes are intentionally shorter-lived than signup codes.

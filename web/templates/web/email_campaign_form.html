@@ -21,6 +21,20 @@
           <label class="campaign-field"><span>{{ form.reply_to.label }}</span>{{ form.reply_to }}<small class="field-hint">Where customer replies should go.</small>{% for error in form.reply_to.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
         </div>
       </details>
+
+      <article class="campaign-preview-card" data-campaign-live-preview aria-label="Live email preview">
+        <div class="campaign-card-heading"><div><p class="eyebrow">LIVE PREVIEW</p><strong>How it will look</strong></div><span>Sample customer</span></div>
+        <div class="campaign-inbox-preview">
+          <small>Inbox preview</small>
+          <strong data-campaign-preview-subject>Your campaign subject</strong>
+          <span data-campaign-preview-preheader>Your preview text will appear here.</span>
+        </div>
+        <div class="campaign-email-preview">
+          <div class="campaign-email-preview-top"><span class="campaign-preview-brand">c</span><span><strong>Cuein</strong><small>to Ayesha Khan</small></span></div>
+          <div class="campaign-preview-body" data-campaign-preview-body><p>Your message will appear here.</p></div>
+          <div class="campaign-preview-footer">This preview uses a sample customer. Live emails include a secure unsubscribe link.</div>
+        </div>
+      </article>
     </article>
 
     <aside class="campaign-compose-sidebar">

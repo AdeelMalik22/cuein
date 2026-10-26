@@ -22,8 +22,8 @@
           {% for campaign in campaigns %}
             <tr>
               <td><a class="table-lead-link" href="{% url 'web:email-campaign-detail' campaign.pk %}"><strong>{{ campaign.subject }}</strong><small>{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}</small></a></td>
-              <td>{{ campaign.sent_count }}/{{ campaign.recipient_count }}<small>{{ campaign.failed_count }} failed</small></td>
-              <td>{{ campaign.get_status_display }}{% if campaign.error_message %}<small>{{ campaign.error_message }}</small>{% endif %}</td>
+              <td>{{ campaign.sent_count }}/{{ campaign.recipient_count }}<small>{{ campaign.failed_count }} failed · {{ campaign.suppressed_count }} excluded</small></td>
+              <td><span class="campaign-status campaign-status-{{ campaign.status }}">{{ campaign.get_status_display }}</span>{% if campaign.error_message %}<small>{{ campaign.error_message }}</small>{% endif %}</td>
               <td>{{ campaign.created_at|date:'M j, Y · g:i A' }}</td>
               <td>{% if campaign.sent_at %}{{ campaign.sent_at|date:'M j, Y · g:i A' }}{% else %}—{% endif %}</td>
             </tr>

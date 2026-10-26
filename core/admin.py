@@ -55,10 +55,10 @@ class PasswordResetRequestAdmin(admin.ModelAdmin):
 
 @admin.register(EmailCampaign)
 class EmailCampaignAdmin(admin.ModelAdmin):
-    list_display = ('subject', 'business', 'status', 'recipient_count', 'sent_count', 'failed_count', 'created_at')
+    list_display = ('subject', 'business', 'status', 'recipient_count', 'sent_count', 'failed_count', 'suppressed_count', 'created_at')
     list_filter = ('status', 'business')
     search_fields = ('subject', 'body', 'business__name')
-    readonly_fields = ('recipient_emails', 'recipient_count', 'sent_count', 'failed_count', 'created_at', 'started_at', 'sent_at', 'completed_at')
+    readonly_fields = ('recipient_emails', 'recipient_count', 'sent_count', 'failed_count', 'suppressed_count', 'created_at', 'started_at', 'sent_at', 'completed_at')
     autocomplete_fields = ('business', 'created_by', 'filter_assigned_user')
 
 

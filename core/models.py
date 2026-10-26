@@ -254,6 +254,7 @@ class EmailCampaign(TenantScopedModel):
     recipient_count = models.PositiveIntegerField(default=0)
     sent_count = models.PositiveIntegerField(default=0)
     failed_count = models.PositiveIntegerField(default=0)
+    suppressed_count = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
     error_message = models.TextField(blank=True)
     created_by = models.ForeignKey(
@@ -285,6 +286,7 @@ class EmailCampaignRecipient(models.Model):
         SENDING = 'sending', 'Sending'
         SENT = 'sent', 'Sent'
         FAILED = 'failed', 'Failed'
+        SUPPRESSED = 'suppressed', 'Suppressed'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     campaign = models.ForeignKey(
