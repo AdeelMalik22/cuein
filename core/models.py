@@ -228,13 +228,19 @@ class EmailCampaign(TenantScopedModel):
     """A tenant-scoped bulk email with a snapshot of its recipients."""
 
     class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        SCHEDULED = 'scheduled', 'Scheduled'
         QUEUED = 'queued', 'Queued'
         SENDING = 'sending', 'Sending'
         SENT = 'sent', 'Sent'
+        PARTIAL = 'partial', 'Partially sent'
         FAILED = 'failed', 'Failed'
 
     subject = models.CharField(max_length=255)
+    preheader = models.CharField(max_length=255, blank=True)
     body = models.TextField()
+    html_body = models.TextField(blank=True)
+    reply_to = models.EmailField(blank=True)
     filter_stage = models.CharField(max_length=20, blank=True)
     filter_source = models.CharField(max_length=20, blank=True)
     filter_assigned_user = models.ForeignKey(
@@ -246,6 +252,8 @@ class EmailCampaign(TenantScopedModel):
     )
     recipient_emails = models.JSONField(default=list)
     recipient_count = models.PositiveIntegerField(default=0)
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
     error_message = models.TextField(blank=True)
     created_by = models.ForeignKey(
@@ -254,7 +262,10 @@ class EmailCampaign(TenantScopedModel):
         related_name='created_email_campaigns',
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [
@@ -264,3 +275,40 @@ class EmailCampaign(TenantScopedModel):
 
     def __str__(self):
         return self.subject
+
+
+class EmailCampaignRecipient(models.Model):
+    """Delivery state for one campaign recipient."""
+
+    class Status(models.TextChoices):
+        QUEUED = 'queued', 'Queued'
+        SENDING = 'sending', 'Sending'
+        SENT = 'sent', 'Sent'
+        FAILED = 'failed', 'Failed'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campaign = models.ForeignKey(
+        EmailCampaign,
+        on_delete=models.CASCADE,
+        related_name='recipients',
+    )
+    email = models.EmailField()
+    customer_name = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    error_message = models.TextField(blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=('campaign', 'email'),
+                name='unique_email_campaign_recipient',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=('campaign', 'status'), name='campaign_recipient_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.email} · {self.campaign.subject}'

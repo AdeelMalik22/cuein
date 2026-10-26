@@ -1309,3 +1309,43 @@ class LeadManagementToolsTests(TestCase):
         response = self.client.get(reverse('web:email-campaign-list'))
 
         self.assertEqual(response.status_code, 403)
+
+    @patch('web.views.send_email_campaign_test.delay')
+    def test_manager_can_send_a_test_without_creating_a_campaign(self, send_test):
+        response = self.client.post(reverse('web:email-campaign-create'), {
+            'subject': 'Preview subject',
+            'body': 'Hello {{ customer_name }}',
+            'test_email': 'owner@northstar.example',
+            'action': 'test',
+        })
+
+        self.assertRedirects(response, reverse('web:email-campaign-create'))
+        self.assertFalse(EmailCampaign.objects.exists())
+        send_test.assert_called_once_with(
+            'Preview subject',
+            'Hello {{ customer_name }}',
+            '',
+            '',
+            '',
+            'owner@northstar.example',
+        )
+
+    @patch('web.views.send_email_campaign.delay')
+    def test_campaign_can_be_scheduled_without_being_sent_immediately(self, queue_campaign):
+        self.create_lead(email='scheduled@example.com')
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse('web:email-campaign-create'), {
+                'subject': 'Scheduled update',
+                'body': 'This will go later.',
+                'scheduled_at': '2099-01-01T09:00',
+                'filter_stage': '',
+                'filter_source': '',
+                'filter_assigned_user': '',
+                'action': 'queue',
+            })
+
+        campaign = EmailCampaign.objects.get(subject='Scheduled update')
+        self.assertRedirects(response, reverse('web:email-campaign-list'))
+        self.assertEqual(campaign.status, EmailCampaign.Status.SCHEDULED)
+        queue_campaign.assert_not_called()

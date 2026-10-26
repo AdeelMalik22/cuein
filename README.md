@@ -17,6 +17,7 @@ The application has two first-class interfaces:
 - Duplicate contact warnings, CSV lead import/export, and manager bulk assignment/stage actions.
 - Won-lead customer history gathered across matching phone/email records.
 - Contacts directory grouped from visible lead records, with search and customer-history links.
+- Manager email campaigns with audience filters, test sends, HTML/plain-text multipart delivery, scheduling, personalization, unsubscribe headers, per-recipient status, and retryable delivery failures.
 - Profile editing with optional profile photos, plus a photo-and-name assignee picker with a fallback avatar.
 - A Kanban board with desktop drag-and-drop, internally scrollable columns, and role-scoped visibility.
 - Follow-up tasks with pending, overdue, done, and cancelled states; complete, reschedule, and cancel workflows.
@@ -155,6 +156,7 @@ For an account with more than one workspace, obtain a token for a specific busin
    EMAIL_HOST_PASSWORD=your-smtp-app-password
    EMAIL_USE_TLS=true
    EMAIL_USE_SSL=false
+   DJANGO_SITE_URL=https://app.yourdomain.com
    EMAIL_VERIFICATION_TIMEOUT=86400
    EMAIL_VERIFICATION_RESEND_COOLDOWN=60
    PASSWORD_RESET_TIMEOUT=900

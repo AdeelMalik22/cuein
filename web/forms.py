@@ -572,16 +572,38 @@ class LeadImportForm(forms.Form):
 
 
 class EmailCampaignForm(forms.ModelForm):
+    scheduled_at = forms.DateTimeField(
+        required=False,
+        input_formats=['%Y-%m-%dT%H:%M'],
+        widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+    )
+    test_email = forms.EmailField(
+        required=False,
+        label='Test recipient',
+        help_text='Send a preview to this address before queueing the campaign.',
+    )
+
     class Meta:
         model = EmailCampaign
-        fields = ('subject', 'body', 'filter_stage', 'filter_source', 'filter_assigned_user')
+        fields = (
+            'subject', 'preheader', 'body', 'html_body', 'reply_to', 'scheduled_at',
+            'filter_stage', 'filter_source', 'filter_assigned_user',
+        )
         widgets = {
             'body': forms.Textarea(attrs={
                 'rows': 12,
-                'placeholder': 'Write the message you want your customers to receive.',
+                'placeholder': 'Write the plain-text version of your message.',
+            }),
+            'html_body': forms.Textarea(attrs={
+                'rows': 10,
+                'placeholder': 'Optional HTML version. Leave blank to generate a clean HTML email from the message above.',
             }),
         }
         labels = {
+            'preheader': 'Inbox preview text',
+            'html_body': 'HTML version (optional)',
+            'reply_to': 'Reply-to email',
+            'scheduled_at': 'Schedule for',
             'filter_stage': 'Stage filter',
             'filter_source': 'Source filter',
             'filter_assigned_user': 'Assigned salesperson',
@@ -590,6 +612,12 @@ class EmailCampaignForm(forms.ModelForm):
     def __init__(self, *args, business, **kwargs):
         super().__init__(*args, **kwargs)
         self.business = business
+        self.fields['scheduled_at'] = BusinessLocalDateTimeField(
+            getattr(business, 'timezone', 'UTC'),
+            required=False,
+            input_formats=['%Y-%m-%dT%H:%M'],
+            widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+        )
         self.fields['filter_stage'].choices = [('', 'All stages'), *Lead.Stage.choices]
         self.fields['filter_source'].choices = [('', 'All sources'), *Lead.Source.choices]
         self.fields['filter_assigned_user'].queryset = users_for_business(business).order_by(
@@ -598,6 +626,15 @@ class EmailCampaignForm(forms.ModelForm):
         self.fields['filter_assigned_user'].required = False
         self.fields['subject'].label = 'Email subject'
         self.fields['body'].label = 'Message'
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.data.get('action') == 'test' and not cleaned_data.get('test_email'):
+            self.add_error('test_email', 'Enter an address for the test email.')
+        scheduled_at = cleaned_data.get('scheduled_at')
+        if self.data.get('action') != 'test' and scheduled_at and scheduled_at <= timezone.now():
+            self.add_error('scheduled_at', 'Choose a future time or leave this blank to send now.')
+        return cleaned_data
 
 
 class LeadBulkActionForm(forms.Form):

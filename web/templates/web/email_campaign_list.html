@@ -6,15 +6,23 @@
     <a class="button button-dark" href="{% url 'web:email-campaign-create' %}">New campaign <span aria-hidden="true">+</span></a>
   </section>
 
-  <section class="panel">
+  <section class="metric-grid campaign-metrics">
+    <article class="metric-card"><span>Total campaigns</span><strong>{{ campaign_metrics.total }}</strong><small>Created in this workspace</small></article>
+    <article class="metric-card"><span>In progress</span><strong>{{ campaign_metrics.active }}</strong><small>Queued or scheduled</small></article>
+    <article class="metric-card"><span>Completed</span><strong>{{ campaign_metrics.sent }}</strong><small>Successfully delivered</small></article>
+    <article class="metric-card"><span>Messages sent</span><strong>{{ campaign_metrics.delivered }}</strong><small>Across all campaigns</small></article>
+  </section>
+
+  <section class="panel campaign-history-panel">
+    <div class="panel-heading"><div><p class="eyebrow">HISTORY</p><h2>Recent campaigns</h2><p class="panel-intro">Open a campaign to inspect every recipient and retry failed deliveries.</p></div></div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Subject</th><th>Recipients</th><th>Status</th><th>Created</th><th>Sent</th></tr></thead>
         <tbody>
           {% for campaign in campaigns %}
             <tr>
-              <td><strong>{{ campaign.subject }}</strong><small>{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}</small></td>
-              <td>{{ campaign.recipient_count }}</td>
+              <td><a class="table-lead-link" href="{% url 'web:email-campaign-detail' campaign.pk %}"><strong>{{ campaign.subject }}</strong><small>{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}</small></a></td>
+              <td>{{ campaign.sent_count }}/{{ campaign.recipient_count }}<small>{{ campaign.failed_count }} failed</small></td>
               <td>{{ campaign.get_status_display }}{% if campaign.error_message %}<small>{{ campaign.error_message }}</small>{% endif %}</td>
               <td>{{ campaign.created_at|date:'M j, Y · g:i A' }}</td>
               <td>{% if campaign.sent_at %}{{ campaign.sent_at|date:'M j, Y · g:i A' }}{% else %}—{% endif %}</td>

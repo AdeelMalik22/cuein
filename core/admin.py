@@ -1,7 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
+from .models import (
+    Business,
+    EmailCampaign,
+    EmailCampaignRecipient,
+    Membership,
+    PasswordResetRequest,
+    PendingRegistration,
+    User,
+)
 
 
 @admin.register(Business)
@@ -43,3 +51,21 @@ class PasswordResetRequestAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__email')
     readonly_fields = ('code_hash', 'created_at', 'sent_at', 'attempts')
     autocomplete_fields = ('user',)
+
+
+@admin.register(EmailCampaign)
+class EmailCampaignAdmin(admin.ModelAdmin):
+    list_display = ('subject', 'business', 'status', 'recipient_count', 'sent_count', 'failed_count', 'created_at')
+    list_filter = ('status', 'business')
+    search_fields = ('subject', 'body', 'business__name')
+    readonly_fields = ('recipient_emails', 'recipient_count', 'sent_count', 'failed_count', 'created_at', 'started_at', 'sent_at', 'completed_at')
+    autocomplete_fields = ('business', 'created_by', 'filter_assigned_user')
+
+
+@admin.register(EmailCampaignRecipient)
+class EmailCampaignRecipientAdmin(admin.ModelAdmin):
+    list_display = ('email', 'campaign', 'status', 'sent_at')
+    list_filter = ('status',)
+    search_fields = ('email', 'customer_name', 'campaign__subject')
+    readonly_fields = ('created_at', 'sent_at')
+    autocomplete_fields = ('campaign',)

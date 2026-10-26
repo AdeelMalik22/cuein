@@ -1,27 +1,57 @@
 {% extends 'web/base.html' %}
 {% block title %}New email campaign · Cuein{% endblock %}
 {% block content %}
-  <section class="page-heading">
-    <div><a class="back-link" href="{% url 'web:email-campaign-list' %}"><span aria-hidden="true">←</span> Back to campaigns</a><p class="eyebrow">CUSTOMER OUTREACH</p><h1>New email campaign</h1><p>Write one message and send it to the customers who match your filters.</p></div>
+  <section class="page-heading campaign-page-heading">
+    <div><a class="back-link" href="{% url 'web:email-campaign-list' %}"><span aria-hidden="true">←</span> Back to campaigns</a><p class="eyebrow">CUSTOMER OUTREACH</p><h1>New email campaign</h1><p>Write once, reach the right customers, and see exactly what happened.</p></div>
   </section>
 
-  <section class="management-layout">
-    <article class="panel management-form-panel">
-      <form method="post" class="stacked-form">
-        {% csrf_token %}
-        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
-        {% for field in form %}
-          <label class="field"><span>{{ field.label }}</span>{{ field }}{% if field.help_text %}<small class="field-hint">{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
-        {% endfor %}
-        <button class="button button-dark" type="submit">Queue campaign <span aria-hidden="true">→</span></button>
-      </form>
+  <form method="post" class="campaign-compose-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-errors campaign-form-error">{{ form.non_field_errors }}</div>{% endif %}
+
+    <article class="panel campaign-editor-panel">
+      <div class="campaign-section-heading"><div><p class="eyebrow">MESSAGE</p><h2>Compose your email</h2></div><span class="campaign-step">01</span></div>
+      <label class="campaign-field"><span>{{ form.subject.label }}</span>{{ form.subject }}{% for error in form.subject.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+      <label class="campaign-field"><span>{{ form.preheader.label }}</span>{{ form.preheader }}<small class="field-hint">The short line many inboxes show beside the subject.</small>{% for error in form.preheader.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+      <label class="campaign-field"><span>{{ form.body.label }}</span>{{ form.body }}<small class="field-hint">Use &#123;&#123; customer_name &#125;&#125; to address each customer by name.</small>{% for error in form.body.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+      <details class="campaign-advanced">
+        <summary>Advanced message options <span>HTML and reply settings</span></summary>
+        <div class="campaign-advanced-grid">
+          <label class="campaign-field campaign-field-wide"><span>{{ form.html_body.label }}</span>{{ form.html_body }}<small class="field-hint">Optional HTML version. Leave blank and Cuein will create one from the plain-text message.</small>{% for error in form.html_body.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+          <label class="campaign-field"><span>{{ form.reply_to.label }}</span>{{ form.reply_to }}<small class="field-hint">Where customer replies should go.</small>{% for error in form.reply_to.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        </div>
+      </details>
     </article>
-    <article class="panel management-list-panel">
-      <p class="eyebrow">RECIPIENTS</p>
-      <h2>{{ recipient_count }} contact{{ recipient_count|pluralize }}</h2>
-      <p class="panel-intro">Only unique contacts with an email address who have not opted out of marketing messages are included.</p>
-      <p class="panel-intro">Campaigns are sent in the background. In local development, the console email backend prints the messages.</p>
-      <p class="panel-intro">Each message includes an unsubscribe link, and opted-out contacts are excluded from future campaigns.</p>
-    </article>
-  </section>
+
+    <aside class="campaign-compose-sidebar">
+      <article class="campaign-audience-card">
+        <div class="campaign-section-heading"><div><p class="eyebrow">AUDIENCE</p><h2>Who should receive it?</h2></div><span class="campaign-step">02</span></div>
+        <strong class="campaign-recipient-count">{{ recipient_count }}</strong><span class="campaign-recipient-label">unique opted-in contact{{ recipient_count|pluralize }}</span>
+        <p>Contacts without an email and customers who opted out are automatically excluded.</p>
+      </article>
+
+      <article class="panel campaign-filter-card">
+        <div class="campaign-card-heading"><strong>Filter audience</strong><span>Optional</span></div>
+        <label class="campaign-field"><span>{{ form.filter_stage.label }}</span>{{ form.filter_stage }}{% for error in form.filter_stage.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <label class="campaign-field"><span>{{ form.filter_source.label }}</span>{{ form.filter_source }}{% for error in form.filter_source.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        <label class="campaign-field"><span>{{ form.filter_assigned_user.label }}</span>{{ form.filter_assigned_user }}{% for error in form.filter_assigned_user.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+      </article>
+
+      <article class="panel campaign-delivery-card">
+        <div class="campaign-section-heading"><div><p class="eyebrow">DELIVERY</p><h2>When should it go?</h2></div><span class="campaign-step">03</span></div>
+        <label class="campaign-field"><span>{{ form.scheduled_at.label }}</span>{{ form.scheduled_at }}<small class="field-hint">Shown in your workspace time zone. Leave blank to send as soon as the queue is available.</small>{% for error in form.scheduled_at.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+      </article>
+
+      <article class="panel campaign-test-card">
+        <div class="campaign-card-heading"><strong>Send a test first</strong><span>Recommended</span></div>
+        <label class="campaign-field"><span>{{ form.test_email.label }}</span>{{ form.test_email }}{% if form.test_email.help_text %}<small class="field-hint">{{ form.test_email.help_text }}</small>{% endif %}{% for error in form.test_email.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+      </article>
+    </aside>
+
+    <div class="campaign-form-actions">
+      <a class="button button-muted" href="{% url 'web:email-campaign-list' %}">Cancel</a>
+      <button class="button button-muted" type="submit" name="action" value="test">Send test email</button>
+      <button class="button button-dark" type="submit" name="action" value="queue">{% if form.scheduled_at.value %}Schedule campaign{% else %}Queue campaign{% endif %} <span aria-hidden="true">→</span></button>
+    </div>
+  </form>
 {% endblock %}

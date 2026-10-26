@@ -19,8 +19,10 @@ from django.db.models.functions import TruncDate
 from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.decorators import method_decorator
 from django.utils import timezone
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import FormView, ListView, TemplateView, UpdateView
 
 from core.email_verification import (
@@ -38,8 +40,8 @@ from core.password_reset import (
     reset_password,
     send_password_reset_code,
 )
-from core.email_campaigns import campaign_recipient_emails
-from core.models import EmailCampaign, Membership, PendingRegistration, User
+from core.email_campaigns import campaign_recipient_contacts, campaign_recipient_emails
+from core.models import EmailCampaign, EmailCampaignRecipient, Membership, PendingRegistration, User
 from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
 from core.security import consume_browser_auth_rate_limit
@@ -55,7 +57,7 @@ from core.tenancy import (
 from core.timezones import business_day_bounds
 from followups.models import FollowUpTask, Notification
 from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
-from core.tasks import send_email_campaign
+from core.tasks import send_email_campaign, send_email_campaign_test
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product, SiteVisit
 from leads.services import (
@@ -1029,6 +1031,15 @@ class EmailCampaignListView(ManagerRequiredMixin, ListView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context.update(self.common_context())
+        business_campaigns = EmailCampaign.objects.for_business(self.get_business())
+        context['campaign_metrics'] = {
+            'total': business_campaigns.count(),
+            'active': business_campaigns.filter(
+                status__in=(EmailCampaign.Status.SCHEDULED, EmailCampaign.Status.QUEUED, EmailCampaign.Status.SENDING),
+            ).count(),
+            'sent': business_campaigns.filter(status=EmailCampaign.Status.SENT).count(),
+            'delivered': sum(business_campaigns.values_list('sent_count', flat=True)),
+        }
         return context
 
 
@@ -1061,41 +1072,116 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
         return context
 
     def form_valid(self, form):
+        if self.request.POST.get('action') == 'test':
+            send_email_campaign_test.delay(
+                form.cleaned_data['subject'],
+                form.cleaned_data['body'],
+                form.cleaned_data.get('html_body', ''),
+                form.cleaned_data.get('preheader', ''),
+                form.cleaned_data.get('reply_to', ''),
+                form.cleaned_data['test_email'],
+            )
+            messages.success(self.request, f'Test email queued for {form.cleaned_data["test_email"]}.')
+            return redirect('web:email-campaign-create')
+
         filters = {
             'stage': form.cleaned_data.get('filter_stage', ''),
             'source': form.cleaned_data.get('filter_source', ''),
             'assigned_user_id': form.cleaned_data.get('filter_assigned_user').pk
             if form.cleaned_data.get('filter_assigned_user') else None,
         }
-        emails = campaign_recipient_emails(self.get_business(), **filters)
-        if not emails:
+        contacts = campaign_recipient_contacts(self.get_business(), **filters)
+        if not contacts:
             form.add_error(None, 'No opted-in contacts with email addresses match these filters.')
             return self.form_invalid(form)
 
+        scheduled_at = form.cleaned_data.get('scheduled_at')
+        status = EmailCampaign.Status.SCHEDULED if scheduled_at else EmailCampaign.Status.QUEUED
         with transaction.atomic():
             campaign = EmailCampaign.objects.create(
                 business=self.get_business(),
                 subject=form.cleaned_data['subject'],
                 body=form.cleaned_data['body'],
+                preheader=form.cleaned_data.get('preheader', ''),
+                html_body=form.cleaned_data.get('html_body', ''),
+                reply_to=form.cleaned_data.get('reply_to', ''),
                 filter_stage=filters['stage'],
                 filter_source=filters['source'],
                 filter_assigned_user=form.cleaned_data.get('filter_assigned_user'),
-                recipient_emails=emails,
-                recipient_count=len(emails),
+                recipient_emails=[contact['email'] for contact in contacts],
+                recipient_count=len(contacts),
+                status=status,
                 created_by=self.request.user,
+                scheduled_at=scheduled_at,
             )
-            transaction.on_commit(lambda: send_email_campaign.delay(str(campaign.pk)))
+            EmailCampaignRecipient.objects.bulk_create([
+                EmailCampaignRecipient(
+                    campaign=campaign,
+                    email=contact['email'],
+                    customer_name=contact['customer_name'],
+                )
+                for contact in contacts
+            ])
+            if status == EmailCampaign.Status.QUEUED:
+                transaction.on_commit(lambda: send_email_campaign.delay(str(campaign.pk)))
         messages.success(
             self.request,
-            f'Campaign queued for {len(emails)} recipient{("s" if len(emails) != 1 else "")}.',
+            f'Campaign {"scheduled" if scheduled_at else "queued"} for {len(contacts)} '
+            f'recipient{("s" if len(contacts) != 1 else "")}.',
         )
         return redirect('web:email-campaign-list')
 
 
+class EmailCampaignDetailView(ManagerRequiredMixin, TemplateView):
+    template_name = 'web/email_campaign_detail.html'
+
+    def get_campaign(self):
+        return get_object_or_404(
+            EmailCampaign.objects.for_business(self.get_business()).select_related('created_by', 'filter_assigned_user'),
+            pk=self.kwargs['pk'],
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        campaign = self.get_campaign()
+        recipients = campaign.recipients.order_by('status', 'email')
+        paginator = Paginator(recipients, 50)
+        page_obj = paginator.get_page(self.request.GET.get('page', 1))
+        context.update(self.common_context())
+        context.update({
+            'campaign': campaign,
+            'recipients': page_obj.object_list,
+            'page_obj': page_obj,
+            'paginator': paginator,
+        })
+        return context
+
+
+class EmailCampaignRetryView(ManagerRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        campaign = get_object_or_404(
+            EmailCampaign.objects.for_business(self.get_business()),
+            pk=kwargs['pk'],
+        )
+        if campaign.status not in (EmailCampaign.Status.PARTIAL, EmailCampaign.Status.FAILED):
+            messages.error(request, 'Only partially sent or failed campaigns can be retried.')
+            return redirect('web:email-campaign-detail', campaign.pk)
+
+        campaign.status = EmailCampaign.Status.QUEUED
+        campaign.error_message = ''
+        campaign.completed_at = None
+        campaign.sent_at = None
+        campaign.save(update_fields=('status', 'error_message', 'completed_at', 'sent_at'))
+        send_email_campaign.delay(str(campaign.pk))
+        messages.success(request, 'Failed recipients were queued for another attempt.')
+        return redirect('web:email-campaign-detail', campaign.pk)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
 class EmailUnsubscribeView(View):
     template_name = 'web/email_unsubscribed.html'
 
-    def get(self, request, *args, **kwargs):
+    def _unsubscribe(self, request):
         token = request.GET.get('token', '')
         try:
             payload = TimestampSigner().unsign_object(token, max_age=60 * 60 * 24 * 365)
@@ -1112,6 +1198,12 @@ class EmailUnsubscribeView(View):
             'valid_token': True,
             'updated': updated,
         })
+
+    def get(self, request, *args, **kwargs):
+        return self._unsubscribe(request)
+
+    def post(self, request, *args, **kwargs):
+        return self._unsubscribe(request)
 
 
 class LeadImportView(ManagerRequiredMixin, FormView):

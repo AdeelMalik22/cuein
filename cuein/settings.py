@@ -367,4 +367,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'followups.tasks.schedule_stale_lead_escalations',
         'schedule': 24 * 60 * 60,
     },
+    'dispatch-scheduled-email-campaigns': {
+        'task': 'core.tasks.dispatch_scheduled_email_campaigns',
+        'schedule': 60,
+    },
 }
