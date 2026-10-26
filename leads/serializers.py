@@ -41,6 +41,7 @@ class LeadSerializer(serializers.ModelSerializer):
             'customer_name',
             'phone',
             'email',
+            'email_marketing_opt_out',
             'source',
             'product',
             'product_name',

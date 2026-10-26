@@ -58,6 +58,7 @@ ALLOWED_HOSTS = [
     for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',')
     if host.strip()
 ]
+DJANGO_SITE_URL = os.environ.get('DJANGO_SITE_URL', 'http://127.0.0.1:8000').rstrip('/')
 if IS_PRODUCTION and not ALLOWED_HOSTS:
     raise ImproperlyConfigured('DJANGO_ALLOWED_HOSTS must be configured in production.')
 

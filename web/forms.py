@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 from core.captcha import captcha_enabled, verify_turnstile
 from core.membership_services import update_membership
-from core.models import Business, Membership, PendingRegistration, User
+from core.models import Business, EmailCampaign, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
@@ -571,6 +571,35 @@ class LeadImportForm(forms.Form):
     )
 
 
+class EmailCampaignForm(forms.ModelForm):
+    class Meta:
+        model = EmailCampaign
+        fields = ('subject', 'body', 'filter_stage', 'filter_source', 'filter_assigned_user')
+        widgets = {
+            'body': forms.Textarea(attrs={
+                'rows': 12,
+                'placeholder': 'Write the message you want your customers to receive.',
+            }),
+        }
+        labels = {
+            'filter_stage': 'Stage filter',
+            'filter_source': 'Source filter',
+            'filter_assigned_user': 'Assigned salesperson',
+        }
+
+    def __init__(self, *args, business, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.business = business
+        self.fields['filter_stage'].choices = [('', 'All stages'), *Lead.Stage.choices]
+        self.fields['filter_source'].choices = [('', 'All sources'), *Lead.Source.choices]
+        self.fields['filter_assigned_user'].queryset = users_for_business(business).order_by(
+            'first_name', 'last_name', 'username',
+        )
+        self.fields['filter_assigned_user'].required = False
+        self.fields['subject'].label = 'Email subject'
+        self.fields['body'].label = 'Message'
+
+
 class LeadBulkActionForm(forms.Form):
     action = forms.ChoiceField(choices=(
         ('assign', 'Assign selected leads'),
@@ -604,7 +633,10 @@ class LeadDetailsForm(forms.ModelForm):
 
     class Meta:
         model = Lead
-        fields = ('customer_name', 'phone', 'email', 'source', 'product', 'quoted_price', 'assigned_user')
+        fields = (
+            'customer_name', 'phone', 'email', 'email_marketing_opt_out', 'source',
+            'product', 'quoted_price', 'assigned_user',
+        )
 
     def __init__(self, *args, business, user, role=None, **kwargs):
         super().__init__(*args, **kwargs)

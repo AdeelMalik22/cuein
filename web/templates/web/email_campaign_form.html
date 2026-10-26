@@ -1,0 +1,27 @@
+{% extends 'web/base.html' %}
+{% block title %}New email campaign · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div><a class="back-link" href="{% url 'web:email-campaign-list' %}"><span aria-hidden="true">←</span> Back to campaigns</a><p class="eyebrow">CUSTOMER OUTREACH</p><h1>New email campaign</h1><p>Write one message and send it to the customers who match your filters.</p></div>
+  </section>
+
+  <section class="management-layout">
+    <article class="panel management-form-panel">
+      <form method="post" class="stacked-form">
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+        {% for field in form %}
+          <label class="field"><span>{{ field.label }}</span>{{ field }}{% if field.help_text %}<small class="field-hint">{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+        {% endfor %}
+        <button class="button button-dark" type="submit">Queue campaign <span aria-hidden="true">→</span></button>
+      </form>
+    </article>
+    <article class="panel management-list-panel">
+      <p class="eyebrow">RECIPIENTS</p>
+      <h2>{{ recipient_count }} contact{{ recipient_count|pluralize }}</h2>
+      <p class="panel-intro">Only unique contacts with an email address who have not opted out of marketing messages are included.</p>
+      <p class="panel-intro">Campaigns are sent in the background. In local development, the console email backend prints the messages.</p>
+      <p class="panel-intro">Each message includes an unsubscribe link, and opted-out contacts are excluded from future campaigns.</p>
+    </article>
+  </section>
+{% endblock %}

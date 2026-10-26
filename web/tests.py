@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 from zoneinfo import ZoneInfo
 
-from core.models import Business, PasswordResetRequest, PendingRegistration, User
+from core.models import Business, EmailCampaign, PasswordResetRequest, PendingRegistration, User
 from followups.models import FollowUpTask, Notification
 from leads.models import Activity, Lead, Product, SiteVisit
 from web.views import DashboardView
@@ -1271,3 +1271,41 @@ class LeadManagementToolsTests(TestCase):
         self.assertEqual(len(first_page.context['contacts']), 10)
         self.assertEqual(len(second_page.context['contacts']), 1)
         self.assertContains(first_page, 'Page 1 of 2')
+
+    @patch('web.views.send_email_campaign.delay')
+    def test_manager_can_queue_a_filtered_email_campaign(self, queue_campaign):
+        self.create_lead(email='first@example.com', source=Lead.Source.WEBSITE)
+        self.create_lead(
+            customer_name='Opted out customer',
+            phone='03009998888',
+            email='opted-out@example.com',
+            source=Lead.Source.WEBSITE,
+            email_marketing_opt_out=True,
+        )
+        self.create_lead(
+            customer_name='Other source customer',
+            phone='03009997777',
+            email='other@example.com',
+            source=Lead.Source.REFERRAL,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse('web:email-campaign-create'), {
+                'subject': 'A useful update',
+                'body': 'Here is a useful update for you.',
+                'filter_source': Lead.Source.WEBSITE,
+                'filter_stage': '',
+                'filter_assigned_user': '',
+            })
+
+        self.assertRedirects(response, reverse('web:email-campaign-list'))
+        campaign = EmailCampaign.objects.get(subject='A useful update')
+        self.assertEqual(campaign.recipient_emails, ['first@example.com'])
+        queue_campaign.assert_called_once_with(str(campaign.pk))
+
+    def test_email_campaign_list_is_manager_only(self):
+        self.client.force_login(self.salesperson)
+
+        response = self.client.get(reverse('web:email-campaign-list'))
+
+        self.assertEqual(response.status_code, 403)

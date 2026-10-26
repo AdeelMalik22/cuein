@@ -57,6 +57,7 @@ class Lead(TenantScopedModel):
     customer_name = models.CharField(max_length=255)
     phone = models.CharField(max_length=32)
     email = models.EmailField(blank=True)
+    email_marketing_opt_out = models.BooleanField(default=False)
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.OTHER)
     product = models.ForeignKey(
         Product,

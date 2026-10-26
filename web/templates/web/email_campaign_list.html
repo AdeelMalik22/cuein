@@ -1,0 +1,36 @@
+{% extends 'web/base.html' %}
+{% block title %}Email campaigns · Cuein{% endblock %}
+{% block content %}
+  <section class="page-heading">
+    <div><p class="eyebrow">CUSTOMER OUTREACH</p><h1>Email campaigns</h1><p>Send a message to all opted-in customers or a filtered group.</p></div>
+    <a class="button button-dark" href="{% url 'web:email-campaign-create' %}">New campaign <span aria-hidden="true">+</span></a>
+  </section>
+
+  <section class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Subject</th><th>Recipients</th><th>Status</th><th>Created</th><th>Sent</th></tr></thead>
+        <tbody>
+          {% for campaign in campaigns %}
+            <tr>
+              <td><strong>{{ campaign.subject }}</strong><small>{{ campaign.created_by.get_full_name|default:campaign.created_by.username }}</small></td>
+              <td>{{ campaign.recipient_count }}</td>
+              <td>{{ campaign.get_status_display }}{% if campaign.error_message %}<small>{{ campaign.error_message }}</small>{% endif %}</td>
+              <td>{{ campaign.created_at|date:'M j, Y · g:i A' }}</td>
+              <td>{% if campaign.sent_at %}{{ campaign.sent_at|date:'M j, Y · g:i A' }}{% else %}—{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="stage-list-empty">No campaigns yet. <a href="{% url 'web:email-campaign-create' %}">Create one</a>.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pagination" aria-label="Campaign pages">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">← Previous</a>{% else %}<span>← Previous</span>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next →</a>{% else %}<span>Next →</span>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

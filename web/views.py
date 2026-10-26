@@ -12,6 +12,7 @@ from django.contrib import messages
 from django.contrib.auth import login, update_session_auth_hash, views as auth_views
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.paginator import Paginator
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
 from django.db.models.functions import TruncDate
@@ -37,7 +38,8 @@ from core.password_reset import (
     reset_password,
     send_password_reset_code,
 )
-from core.models import Membership, PendingRegistration, User
+from core.email_campaigns import campaign_recipient_emails
+from core.models import EmailCampaign, Membership, PendingRegistration, User
 from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
 from core.security import consume_browser_auth_rate_limit
@@ -53,6 +55,7 @@ from core.tenancy import (
 from core.timezones import business_day_bounds
 from followups.models import FollowUpTask, Notification
 from followups.services import TaskAlreadyClosedError, complete_task, reschedule_task
+from core.tasks import send_email_campaign
 from leads.cache import invalidate_business_lead_cache
 from leads.models import Activity, Lead, Product, SiteVisit
 from leads.services import (
@@ -78,6 +81,7 @@ from .forms import (
     LeadDetailsForm,
     LeadFollowUpForm,
     LeadImportForm,
+    EmailCampaignForm,
     LeadQuickAddForm,
     LeadStageForm,
     ProfileForm,
@@ -1010,6 +1014,104 @@ class ContactListView(TenantWebMixin, TemplateView):
             'contact_count': len(contact_list),
         })
         return context
+
+
+class EmailCampaignListView(ManagerRequiredMixin, ListView):
+    template_name = 'web/email_campaign_list.html'
+    context_object_name = 'campaigns'
+    paginate_by = 20
+
+    def get_queryset(self):
+        return EmailCampaign.objects.for_business(self.get_business()).select_related(
+            'created_by', 'filter_assigned_user',
+        ).order_by('-created_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.common_context())
+        return context
+
+
+class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
+    template_name = 'web/email_campaign_form.html'
+    form_class = EmailCampaignForm
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['business'] = self.get_business()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        form = context.get('form')
+        filters = {}
+        if form and form.is_bound:
+            cleaned_filters = getattr(form, 'cleaned_data', {})
+            filters = {
+                'stage': cleaned_filters.get('filter_stage', ''),
+                'source': cleaned_filters.get('filter_source', ''),
+                'assigned_user_id': cleaned_filters.get('filter_assigned_user').pk
+                if cleaned_filters.get('filter_assigned_user') else None,
+            }
+        context.update(self.common_context())
+        context['recipient_count'] = len(campaign_recipient_emails(
+            self.get_business(),
+            **filters,
+        ))
+        return context
+
+    def form_valid(self, form):
+        filters = {
+            'stage': form.cleaned_data.get('filter_stage', ''),
+            'source': form.cleaned_data.get('filter_source', ''),
+            'assigned_user_id': form.cleaned_data.get('filter_assigned_user').pk
+            if form.cleaned_data.get('filter_assigned_user') else None,
+        }
+        emails = campaign_recipient_emails(self.get_business(), **filters)
+        if not emails:
+            form.add_error(None, 'No opted-in contacts with email addresses match these filters.')
+            return self.form_invalid(form)
+
+        with transaction.atomic():
+            campaign = EmailCampaign.objects.create(
+                business=self.get_business(),
+                subject=form.cleaned_data['subject'],
+                body=form.cleaned_data['body'],
+                filter_stage=filters['stage'],
+                filter_source=filters['source'],
+                filter_assigned_user=form.cleaned_data.get('filter_assigned_user'),
+                recipient_emails=emails,
+                recipient_count=len(emails),
+                created_by=self.request.user,
+            )
+            transaction.on_commit(lambda: send_email_campaign.delay(str(campaign.pk)))
+        messages.success(
+            self.request,
+            f'Campaign queued for {len(emails)} recipient{("s" if len(emails) != 1 else "")}.',
+        )
+        return redirect('web:email-campaign-list')
+
+
+class EmailUnsubscribeView(View):
+    template_name = 'web/email_unsubscribed.html'
+
+    def get(self, request, *args, **kwargs):
+        token = request.GET.get('token', '')
+        try:
+            payload = TimestampSigner().unsign_object(token, max_age=60 * 60 * 24 * 365)
+            business_id = payload['business_id']
+            email = payload['email']
+        except (BadSignature, SignatureExpired, KeyError, TypeError):
+            return render(request, self.template_name, {'valid_token': False}, status=400)
+
+        updated = Lead.objects.filter(
+            business_id=business_id,
+            email__iexact=email,
+        ).update(email_marketing_opt_out=True)
+        return render(request, self.template_name, {
+            'valid_token': True,
+            'updated': updated,
+        })
 
 
 class LeadImportView(ManagerRequiredMixin, FormView):

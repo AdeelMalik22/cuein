@@ -222,3 +222,45 @@ class PasswordResetRequest(models.Model):
 
     def __str__(self):
         return f'Password reset for {self.user.email or self.user.username}'
+
+
+class EmailCampaign(TenantScopedModel):
+    """A tenant-scoped bulk email with a snapshot of its recipients."""
+
+    class Status(models.TextChoices):
+        QUEUED = 'queued', 'Queued'
+        SENDING = 'sending', 'Sending'
+        SENT = 'sent', 'Sent'
+        FAILED = 'failed', 'Failed'
+
+    subject = models.CharField(max_length=255)
+    body = models.TextField()
+    filter_stage = models.CharField(max_length=20, blank=True)
+    filter_source = models.CharField(max_length=20, blank=True)
+    filter_assigned_user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='email_campaign_filters',
+    )
+    recipient_emails = models.JSONField(default=list)
+    recipient_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    error_message = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name='created_email_campaigns',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=('business', 'created_at')),
+            models.Index(fields=('business', 'status')),
+        ]
+
+    def __str__(self):
+        return self.subject
