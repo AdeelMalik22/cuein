@@ -33,5 +33,12 @@
         </tbody>
       </table>
     </div>
+    {% if page_obj.paginator.num_pages > 1 %}
+      <nav class="pagination" aria-label="Contact pages">
+        {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}{% if search %}&amp;q={{ search|urlencode }}{% endif %}">← Previous</a>{% else %}<span>← Previous</span>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}{% if search %}&amp;q={{ search|urlencode }}{% endif %}">Next →</a>{% else %}<span>Next →</span>{% endif %}
+      </nav>
+    {% endif %}
   </section>
 {% endblock %}

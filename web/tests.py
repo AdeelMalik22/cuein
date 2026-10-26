@@ -1254,3 +1254,20 @@ class LeadManagementToolsTests(TestCase):
         self.assertContains(response, 'Add contact')
         self.assertContains(response, '>2<')
         self.assertContains(response, reverse('web:customer-history', args=[first.pk]))
+
+    def test_contacts_are_paginated_at_ten_per_page(self):
+        for index in range(11):
+            self.create_lead(
+                customer_name=f'Contact {index}',
+                phone=f'0300999{index:04d}',
+                email=f'contact{index}@example.com',
+            )
+
+        first_page = self.client.get(reverse('web:contact-list'))
+        second_page = self.client.get(reverse('web:contact-list'), {'page': 2})
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(first_page.context['page_obj'].paginator.per_page, 10)
+        self.assertEqual(len(first_page.context['contacts']), 10)
+        self.assertEqual(len(second_page.context['contacts']), 1)
+        self.assertContains(first_page, 'Page 1 of 2')

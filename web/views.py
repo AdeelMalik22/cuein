@@ -11,6 +11,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login, update_session_auth_hash, views as auth_views
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
 from django.db.models.functions import TruncDate
@@ -997,9 +998,14 @@ class ContactListView(TenantWebMixin, TemplateView):
             key=lambda contact: (contact['last_activity_at'], contact['name'].casefold()),
             reverse=True,
         )
+        paginator = Paginator(contact_list, 10)
+        page_number = self.request.GET.get('page', 1)
+        page_obj = paginator.get_page(page_number)
         context.update(self.common_context())
         context.update({
-            'contacts': contact_list,
+            'contacts': page_obj.object_list,
+            'page_obj': page_obj,
+            'paginator': paginator,
             'search': search,
             'contact_count': len(contact_list),
         })
