@@ -1,4 +1,5 @@
 import csv
+import base64
 import io
 import re
 from decimal import Decimal, InvalidOperation
@@ -16,7 +17,7 @@ from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
 from django.db import transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
 from django.db.models.functions import TruncDate
-from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.decorators import method_decorator
@@ -41,7 +42,7 @@ from core.password_reset import (
     send_password_reset_code,
 )
 from core.email_campaigns import campaign_recipient_contacts, campaign_recipient_emails
-from core.models import EmailCampaign, EmailCampaignRecipient, Membership, PendingRegistration, User
+from core.models import EmailCampaign, EmailCampaignAttachment, EmailCampaignRecipient, Membership, PendingRegistration, User
 from core.membership_services import LastActiveOwnerError, update_membership
 from core.captcha import captcha_enabled
 from core.security import consume_browser_auth_rate_limit
@@ -1073,6 +1074,14 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
 
     def form_valid(self, form):
         if self.request.POST.get('action') == 'test':
+            attachment_payloads = []
+            for uploaded in form.cleaned_data.get('attachments', []):
+                uploaded.seek(0)
+                attachment_payloads.append({
+                    'filename': uploaded.name,
+                    'content': base64.b64encode(uploaded.read()).decode('ascii'),
+                    'mimetype': uploaded.content_type or 'application/octet-stream',
+                })
             send_email_campaign_test.delay(
                 form.cleaned_data['subject'],
                 form.cleaned_data['body'],
@@ -1080,6 +1089,7 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
                 form.cleaned_data.get('preheader', ''),
                 form.cleaned_data.get('reply_to', ''),
                 form.cleaned_data['test_email'],
+                attachment_payloads,
             )
             messages.success(self.request, f'Test email queued for {form.cleaned_data["test_email"]}.')
             return redirect('web:email-campaign-create')
@@ -1123,6 +1133,15 @@ class EmailCampaignCreateView(ManagerRequiredMixin, FormView):
                 )
                 for contact in contacts
             ])
+            for uploaded in form.cleaned_data.get('attachments', []):
+                uploaded.seek(0)
+                EmailCampaignAttachment.objects.create(
+                    campaign=campaign,
+                    file=uploaded,
+                    original_name=uploaded.name,
+                    content_type=uploaded.content_type or 'application/octet-stream',
+                    size=uploaded.size,
+                )
             if status == EmailCampaign.Status.QUEUED:
                 transaction.on_commit(lambda: send_email_campaign.delay(str(campaign.pk)))
         messages.success(
@@ -1151,6 +1170,7 @@ class EmailCampaignDetailView(ManagerRequiredMixin, TemplateView):
         context.update(self.common_context())
         context.update({
             'campaign': campaign,
+            'attachments': campaign.attachments.all(),
             'recipients': page_obj.object_list,
             'page_obj': page_obj,
             'paginator': paginator,
@@ -1177,6 +1197,23 @@ class EmailCampaignRetryView(ManagerRequiredMixin, View):
             transaction.on_commit(lambda: send_email_campaign.delay(str(campaign.pk)))
         messages.success(request, 'Failed recipients were queued for another attempt.')
         return redirect('web:email-campaign-detail', campaign.pk)
+
+
+class EmailCampaignAttachmentDownloadView(ManagerRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        attachment = get_object_or_404(
+            EmailCampaignAttachment.objects.select_related('campaign').filter(
+                campaign__business=self.get_business(),
+            ),
+            pk=kwargs['pk'],
+        )
+        response = FileResponse(
+            attachment.file.open('rb'),
+            as_attachment=True,
+            filename=attachment.original_name,
+        )
+        response['Content-Type'] = attachment.content_type or 'application/octet-stream'
+        return response
 
 
 @method_decorator(csrf_exempt, name='dispatch')

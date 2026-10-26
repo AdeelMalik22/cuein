@@ -1,4 +1,5 @@
 from html import escape
+import base64
 from urllib.parse import urlencode
 
 from celery import shared_task
@@ -129,6 +130,26 @@ def _unsubscribe_url(campaign, email):
     return f'{site_url}{reverse("web:email-unsubscribe")}?{urlencode({"token": token})}'
 
 
+def _campaign_attachment_payloads(campaign):
+    payloads = []
+    for attachment in campaign.attachments.all():
+        with attachment.file.open('rb') as file_handle:
+            payloads.append({
+                'filename': attachment.original_name,
+                'content': file_handle.read(),
+                'mimetype': attachment.content_type or 'application/octet-stream',
+            })
+    return payloads
+
+
+def _attach_payloads(message, payloads):
+    for payload in payloads or []:
+        content = payload['content']
+        if isinstance(content, str):
+            content = base64.b64decode(content.encode('ascii'))
+        message.attach(payload['filename'], content, payload.get('mimetype', 'application/octet-stream'))
+
+
 @shared_task
 def send_email_campaign(campaign_id):
     """Deliver a campaign and persist a separate result for every recipient."""
@@ -174,6 +195,7 @@ def send_email_campaign(campaign_id):
 
     connection_error = ''
     try:
+        attachment_payloads = _campaign_attachment_payloads(campaign)
         with get_connection() as connection:
             for recipient in pending:
                 recipient.status = EmailCampaignRecipient.Status.SENDING
@@ -191,6 +213,7 @@ def send_email_campaign(campaign_id):
                         unsubscribe_url=_unsubscribe_url(campaign, recipient.email),
                     )
                     message.attach_alternative(html, 'text/html')
+                    _attach_payloads(message, attachment_payloads)
                     sent = connection.send_messages([message])
                     if sent == 1:
                         recipient.status = EmailCampaignRecipient.Status.SENT
@@ -204,7 +227,10 @@ def send_email_campaign(campaign_id):
                 recipient.save(update_fields=('status', 'sent_at', 'error_message'))
     except Exception as error:
         connection_error = str(error)[:2000]
-        recipients.filter(status=EmailCampaignRecipient.Status.SENDING).update(
+        recipients.filter(status__in=(
+            EmailCampaignRecipient.Status.QUEUED,
+            EmailCampaignRecipient.Status.SENDING,
+        )).update(
             status=EmailCampaignRecipient.Status.FAILED,
             error_message=connection_error,
         )
@@ -237,7 +263,7 @@ def send_email_campaign(campaign_id):
 
 
 @shared_task
-def send_email_campaign_test(subject, body, html_body, preheader, reply_to, test_email):
+def send_email_campaign_test(subject, body, html_body, preheader, reply_to, test_email, attachment_payloads=None):
     """Send a preview without creating a campaign or touching customer data."""
     message, html = _message_for_recipient(
         subject=subject,
@@ -249,6 +275,7 @@ def send_email_campaign_test(subject, body, html_body, preheader, reply_to, test
         is_test=True,
     )
     message.attach_alternative(html, 'text/html')
+    _attach_payloads(message, attachment_payloads)
     with get_connection() as connection:
         sent = connection.send_messages([message])
     return {'sent': sent == 1, 'email': test_email}

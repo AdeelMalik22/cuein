@@ -1328,6 +1328,7 @@ class LeadManagementToolsTests(TestCase):
             '',
             '',
             'owner@northstar.example',
+            [],
         )
 
     @patch('web.views.send_email_campaign.delay')

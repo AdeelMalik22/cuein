@@ -18,7 +18,7 @@ from .email_verification import EmailVerificationCooldownError, send_email_verif
 from .membership_services import LastActiveOwnerError, remove_membership
 from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
 from .password_reset import PasswordResetCooldownError, send_password_reset_code
-from .tasks import _message_for_recipient
+from .tasks import _attach_payloads, _message_for_recipient
 
 
 PUBLIC_AUTH_THROTTLE_TEST_RATES = {
@@ -53,6 +53,23 @@ class EmailCampaignMessageTests(SimpleTestCase):
         self.assertEqual(message.reply_to, ['sales@example.com'])
         self.assertIn('List-Unsubscribe', message.extra_headers)
         self.assertEqual(message.alternatives[0][1], 'text/html')
+
+    def test_attachment_payloads_are_added_to_the_message(self):
+        message, _html = _message_for_recipient(
+            subject='Attachment test',
+            body='Please see the file.',
+            html_body='',
+            preheader='',
+            email='customer@example.com',
+        )
+        _attach_payloads(message, [{
+            'filename': 'quote.pdf',
+            'content': 'cGRm',
+            'mimetype': 'application/pdf',
+        }])
+
+        self.assertEqual(message.attachments[0][0], 'quote.pdf')
+        self.assertEqual(message.attachments[0][2], 'application/pdf')
 
 
 class CurrentUserApiTests(APITestCase):

@@ -2688,6 +2688,13 @@ body.notification-page .notification-filter-tab.is-active b {
     grid-column: 1 / -1;
 }
 
+.campaign-attachment-field input[type="file"] {
+    background: var(--surface-muted);
+    border-style: dashed;
+    cursor: pointer;
+    padding: .85rem;
+}
+
 .campaign-audience-card {
     background: var(--ink);
     border-radius: 1rem;
@@ -2841,6 +2848,46 @@ body.notification-page .notification-filter-tab.is-active b {
     font-size: .77rem;
     margin: 0;
     text-align: right;
+}
+
+.campaign-attachment-list {
+    border-top: 1px solid var(--line);
+    display: grid;
+    gap: .45rem;
+    margin-top: 1rem;
+    padding-top: .9rem;
+}
+
+.campaign-attachment-list > p {
+    margin-bottom: .15rem;
+}
+
+.campaign-attachment-list a {
+    align-items: center;
+    background: var(--surface-muted);
+    border: 1px solid var(--line);
+    border-radius: .5rem;
+    display: flex;
+    font-size: .72rem;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .55rem .65rem;
+}
+
+.campaign-attachment-list a:hover {
+    border-color: var(--line-dark);
+    background: var(--paper);
+}
+
+.campaign-attachment-list span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.campaign-attachment-list small {
+    flex: 0 0 auto;
+    font-size: .62rem;
 }
 
 @media (max-width: 860px) {

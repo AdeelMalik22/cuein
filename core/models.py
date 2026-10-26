@@ -314,3 +314,25 @@ class EmailCampaignRecipient(models.Model):
 
     def __str__(self):
         return f'{self.email} · {self.campaign.subject}'
+
+
+class EmailCampaignAttachment(models.Model):
+    """A validated file attached to every message in a campaign."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campaign = models.ForeignKey(
+        EmailCampaign,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+    )
+    file = models.FileField(upload_to='campaign_attachments/%Y/%m/')
+    original_name = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=128, blank=True)
+    size = models.PositiveBigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('created_at', 'id')
+
+    def __str__(self):
+        return self.original_name

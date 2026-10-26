@@ -23,6 +23,9 @@
       <p class="eyebrow">MESSAGE</p>
       <h2>{{ campaign.preheader|default:'No inbox preview text' }}</h2>
       <p class="panel-intro">{{ campaign.body|linebreaksbr }}</p>
+      {% if attachments %}
+        <div class="campaign-attachment-list"><p class="eyebrow">ATTACHMENTS</p>{% for attachment in attachments %}<a href="{% url 'web:email-campaign-attachment-download' attachment.pk %}"><span>{{ attachment.original_name }}</span><small>{{ attachment.size|filesizeformat }}</small></a>{% endfor %}</div>
+      {% endif %}
     </article>
   </section>
 

@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from django import forms
 from django.contrib.auth.forms import AuthenticationForm
@@ -571,7 +572,26 @@ class LeadImportForm(forms.Form):
     )
 
 
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
+
+class MultipleFileField(forms.FileField):
+    widget = MultipleFileInput
+
+    def clean(self, data, initial=None):
+        single_file_clean = super().clean
+        if isinstance(data, (list, tuple)):
+            return [single_file_clean(item, initial) for item in data]
+        return [single_file_clean(data, initial)] if data else []
+
+
 class EmailCampaignForm(forms.ModelForm):
+    attachments = MultipleFileField(
+        required=False,
+        label='Attachments',
+        help_text='Up to 10 files, 10 MB each and 25 MB total. PDF, Office, CSV, TXT, ZIP, and common image files are supported.',
+    )
     scheduled_at = forms.DateTimeField(
         required=False,
         input_formats=['%Y-%m-%dT%H:%M'],
@@ -634,6 +654,22 @@ class EmailCampaignForm(forms.ModelForm):
         scheduled_at = cleaned_data.get('scheduled_at')
         if self.data.get('action') != 'test' and scheduled_at and scheduled_at <= timezone.now():
             self.add_error('scheduled_at', 'Choose a future time or leave this blank to send now.')
+        attachments = cleaned_data.get('attachments', [])
+        allowed_extensions = {
+            '.csv', '.doc', '.docx', '.gif', '.jpeg', '.jpg', '.json', '.pdf',
+            '.png', '.ppt', '.pptx', '.txt', '.webp', '.xls', '.xlsx', '.zip',
+        }
+        max_file_size = 10 * 1024 * 1024
+        max_total_size = 25 * 1024 * 1024
+        if len(attachments) > 10:
+            self.add_error('attachments', 'Attach no more than 10 files.')
+        if sum(uploaded.size for uploaded in attachments) > max_total_size:
+            self.add_error('attachments', 'Attachments must be 25 MB or smaller in total.')
+        for uploaded in attachments:
+            if uploaded.size > max_file_size:
+                self.add_error('attachments', f'{uploaded.name} is larger than the 10 MB per-file limit.')
+            if Path(uploaded.name).suffix.casefold() not in allowed_extensions:
+                self.add_error('attachments', f'{uploaded.name} is not a supported attachment type.')
         return cleaned_data
 
 

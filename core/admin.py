@@ -4,6 +4,7 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     Business,
     EmailCampaign,
+    EmailCampaignAttachment,
     EmailCampaignRecipient,
     Membership,
     PasswordResetRequest,
@@ -68,4 +69,12 @@ class EmailCampaignRecipientAdmin(admin.ModelAdmin):
     list_filter = ('status',)
     search_fields = ('email', 'customer_name', 'campaign__subject')
     readonly_fields = ('created_at', 'sent_at')
+    autocomplete_fields = ('campaign',)
+
+
+@admin.register(EmailCampaignAttachment)
+class EmailCampaignAttachmentAdmin(admin.ModelAdmin):
+    list_display = ('original_name', 'campaign', 'content_type', 'size', 'created_at')
+    search_fields = ('original_name', 'campaign__subject')
+    readonly_fields = ('original_name', 'content_type', 'size', 'created_at')
     autocomplete_fields = ('campaign',)

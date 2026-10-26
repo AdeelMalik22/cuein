@@ -19,6 +19,7 @@
         <div class="campaign-advanced-grid">
           <label class="campaign-field campaign-field-wide"><span>{{ form.html_body.label }}</span>{{ form.html_body }}<small class="field-hint">Optional HTML version. Leave blank and Cuein will create one from the plain-text message.</small>{% for error in form.html_body.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
           <label class="campaign-field"><span>{{ form.reply_to.label }}</span>{{ form.reply_to }}<small class="field-hint">Where customer replies should go.</small>{% for error in form.reply_to.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
+          <label class="campaign-field campaign-field-wide campaign-attachment-field"><span>{{ form.attachments.label }}</span>{{ form.attachments }}<small class="field-hint">{{ form.attachments.help_text }}</small>{% for error in form.attachments.errors %}<small class="form-error">{{ error }}</small>{% endfor %}</label>
         </div>
       </details>
 
