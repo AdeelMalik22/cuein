@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 import os
+from ipaddress import ip_network
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -95,6 +96,11 @@ SECURE_REFERRER_POLICY = 'same-origin'
 X_FRAME_OPTIONS = 'DENY'
 
 TRUST_X_FORWARDED_FOR = os.environ.get('DJANGO_BEHIND_PROXY', '').lower() == 'true'
+TRUSTED_PROXY_NETWORKS = tuple(
+    ip_network(value.strip(), strict=False)
+    for value in os.environ.get('DJANGO_TRUSTED_PROXY_IPS', '').split(',')
+    if value.strip()
+)
 if TRUST_X_FORWARDED_FOR:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
@@ -307,6 +313,15 @@ BROWSER_AUTH_THROTTLE_RATES = {
     'web_password_reset_confirm': '10/hour',
     'web_login': '10/minute',
 }
+# Authentication protections must not silently disappear when the shared
+# cache is unavailable in production. The short retry window avoids an
+# indefinite lockout while the service recovers; local development keeps the
+# previous fail-open behavior unless explicitly enabled.
+AUTH_CACHE_FAIL_CLOSED = os.environ.get(
+    'AUTH_CACHE_FAIL_CLOSED',
+    'true' if IS_PRODUCTION else 'false',
+).lower() == 'true'
+AUTH_CACHE_FAILURE_RETRY_SECONDS = int(os.environ.get('AUTH_CACHE_FAILURE_RETRY_SECONDS', '60'))
 
 LOGIN_FAILURE_WINDOW = int(os.environ.get('LOGIN_FAILURE_WINDOW', str(60 * 60)))
 LOGIN_BACKOFF_FAILURE_THRESHOLD = int(os.environ.get('LOGIN_BACKOFF_FAILURE_THRESHOLD', '3'))

@@ -6,7 +6,7 @@ from django.contrib.auth.hashers import make_password
 from django.core import mail
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.test import SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -18,6 +18,7 @@ from .email_verification import EmailVerificationCooldownError, send_email_verif
 from .membership_services import LastActiveOwnerError, remove_membership
 from .models import Business, Membership, PasswordResetRequest, PendingRegistration, User
 from .password_reset import PasswordResetCooldownError, send_password_reset_code
+from .security import client_ip, consume_rate_limit, login_attempt_state
 from .tasks import _attach_payloads, _message_for_recipient
 
 
@@ -71,6 +72,55 @@ class EmailCampaignMessageTests(SimpleTestCase):
 
         self.assertEqual(message.attachments[0][0], 'quote.pdf')
         self.assertEqual(message.attachments[0][2], 'application/pdf')
+
+
+class AuthenticationCacheFailureTests(SimpleTestCase):
+    @override_settings(AUTH_CACHE_FAIL_CLOSED=True, AUTH_CACHE_FAILURE_RETRY_SECONDS=17)
+    @patch('core.security.cache.add', side_effect=OSError('redis unavailable'))
+    def test_rate_limit_rejects_requests_when_shared_cache_is_unavailable(self, _cache_add):
+        result = consume_rate_limit('signup', '198.51.100.20', '5/hour')
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.retry_after, 17)
+
+    @override_settings(AUTH_CACHE_FAIL_CLOSED=True, AUTH_CACHE_FAILURE_RETRY_SECONDS=17)
+    @patch('core.security.cache.get', side_effect=OSError('redis unavailable'))
+    def test_login_backoff_blocks_briefly_when_shared_cache_is_unavailable(self, _cache_get):
+        request = RequestFactory().post('/login/')
+        request.META['REMOTE_ADDR'] = '198.51.100.20'
+
+        state = login_attempt_state(request, 'alice')
+
+        self.assertEqual(state.retry_after, 17)
+
+    @override_settings(
+        TRUST_X_FORWARDED_FOR=True,
+        TRUSTED_PROXY_NETWORKS=(),
+    )
+    def test_forwarded_ip_is_ignored_without_a_trusted_proxy(self):
+        request = RequestFactory().get('/')
+        request.META.update({
+            'REMOTE_ADDR': '198.51.100.20',
+            'HTTP_X_FORWARDED_FOR': '203.0.113.10',
+        })
+
+        self.assertEqual(client_ip(request), '198.51.100.20')
+
+    @override_settings(
+        TRUST_X_FORWARDED_FOR=True,
+        TRUSTED_PROXY_NETWORKS=(),
+    )
+    def test_forwarded_ip_requires_an_allowlisted_proxy_peer(self):
+        from ipaddress import ip_network
+
+        with self.settings(TRUSTED_PROXY_NETWORKS=(ip_network('10.0.0.0/8'),)):
+            request = RequestFactory().get('/')
+            request.META.update({
+                'REMOTE_ADDR': '10.2.3.4',
+                'HTTP_X_FORWARDED_FOR': '203.0.113.10, 10.2.3.4',
+            })
+
+            self.assertEqual(client_ip(request), '203.0.113.10')
 
 
 class CurrentUserApiTests(APITestCase):

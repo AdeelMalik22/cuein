@@ -173,9 +173,10 @@ For an account with more than one workspace, obtain a token for a specific busin
    DJANGO_ALLOWED_HOSTS=app.yourdomain.com
    DJANGO_CSRF_TRUSTED_ORIGINS=https://app.yourdomain.com
    DJANGO_BEHIND_PROXY=true
+   DJANGO_TRUSTED_PROXY_IPS=10.0.0.10,10.0.0.0/8
    ```
 
-   Set `DJANGO_BEHIND_PROXY=true` only when a trusted proxy terminates TLS and supplies `X-Forwarded-Proto` and `X-Forwarded-For`. To enable the conditional CAPTCHA after repeated failed logins, add Cloudflare Turnstile keys:
+   Set `DJANGO_BEHIND_PROXY=true` only when a trusted proxy terminates TLS and supplies `X-Forwarded-Proto` and `X-Forwarded-For`. Set `DJANGO_TRUSTED_PROXY_IPS` to the proxy/load-balancer source IPs or CIDR ranges; forwarded client IPs are ignored unless the direct peer matches this allowlist. To enable the conditional CAPTCHA after repeated failed logins, add Cloudflare Turnstile keys:
 
    ```text
    TURNSTILE_SITE_KEY=your-turnstile-site-key
