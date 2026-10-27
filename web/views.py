@@ -15,7 +15,7 @@ from django.contrib.auth import login, update_session_auth_hash, views as auth_v
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.paginator import Paginator
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Q, Sum
 from django.db.models.functions import TruncDate
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden, JsonResponse
@@ -34,6 +34,7 @@ from core.email_verification import (
     EmailVerificationError,
     send_email_verification,
 )
+from core.signup import SignupConflictError
 from core.authentication import revoke_refresh_tokens_for_user
 from core.password_reset import (
     PasswordResetCooldownError,
@@ -169,6 +170,16 @@ class SignupView(BrowserAuthRateLimitMixin, FormView):
             with transaction.atomic():
                 registration = form.save()
                 send_email_verification(registration)
+        except SignupConflictError:
+            form.add_error(None, 'That signup is already being created. Please submit again.')
+            return self.form_invalid(form)
+        except IntegrityError:
+            # Keep a production race or an older database constraint from
+            # becoming a raw 500 page. Normal generated usernames are handled
+            # and retried by create_pending_registration; this is the final
+            # safety net for deployments receiving concurrent requests.
+            form.add_error(None, 'That signup is already being created. Please submit again.')
+            return self.form_invalid(form)
         except EmailVerificationDeliveryError:
             form.add_error(None, 'We could not send the verification code. Please try again in a moment.')
             return self.form_invalid(form)

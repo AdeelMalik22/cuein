@@ -214,7 +214,11 @@ For an account with more than one workspace, obtain a token for a specific busin
    python3.10 -m celery -A cuein beat --loglevel=INFO
    ```
 
-   Celery uses `redis://127.0.0.1:6379/0` by default. Override `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` in `.env` when Redis runs elsewhere.
+   Celery uses `redis://127.0.0.1:6379/0` by default. In production, provision a
+   Redis/Valkey service and set `REDIS_URL` (or set the explicit
+   `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`, and `REDIS_CACHE_URL` values)
+   to its reachable URL. `localhost` inside a container points to the app
+   container, not the managed Redis service.
 
 ## Production server
 

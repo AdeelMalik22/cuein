@@ -7,6 +7,7 @@ from rest_framework import serializers
 from .authentication import revoke_refresh_tokens_for_user
 from .membership_services import LastActiveOwnerError, update_membership
 from .models import Business, Membership, PendingRegistration, User
+from .signup import create_pending_registration
 from .tenancy import active_business, default_active_membership_for, request_membership
 from .validators import validate_iana_timezone
 
@@ -236,7 +237,8 @@ class SignupSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        return PendingRegistration.objects.create(
+        return create_pending_registration(
+            username=validated_data.pop('username'),
             business_name=validated_data.pop('business_name'),
             industry=validated_data.pop('industry'),
             timezone=validated_data.pop('timezone'),

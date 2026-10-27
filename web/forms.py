@@ -15,6 +15,7 @@ from core.captcha import captcha_enabled, verify_turnstile
 from core.membership_services import update_membership
 from core.models import Business, EmailCampaign, EmailThread, MailTemplate, MailboxConnection, Membership, PendingRegistration, User
 from core.security import clear_login_failures, client_ip, login_attempt_state, record_failed_login
+from core.signup import create_pending_registration
 from core.tenancy import users_for_business
 from followups.models import FollowUpTask
 from leads.models import Activity, Lead, Product, SiteVisit
@@ -201,7 +202,7 @@ class SignupForm(forms.Form):
     industry = forms.ChoiceField(choices=Business.Industry.choices)
     owner_name = forms.CharField(max_length=150)
     email = forms.EmailField()
-    password = forms.CharField(widget=forms.PasswordInput)
+    password = forms.CharField(widget=forms.PasswordInput(attrs={'autocomplete': 'new-password'}))
 
     def clean_email(self):
         email = self.cleaned_data['email'].strip().lower()
@@ -216,25 +217,18 @@ class SignupForm(forms.Form):
         validate_password(password)
         return password
 
-    @transaction.atomic
     def save(self):
         owner_name = self.cleaned_data['owner_name'].strip()
         first_name, *remaining_names = owner_name.split(maxsplit=1)
         last_name = remaining_names[0] if remaining_names else ''
         email = self.cleaned_data['email']
         base_username = slugify(email.split('@', 1)[0]).replace('-', '')[:140] or 'owner'
-        username = base_username
-        suffix = 2
-        while User.objects.filter(username__iexact=username).exists() or PendingRegistration.objects.filter(
-            username__iexact=username,
-        ).exists():
-            username = f'{base_username[:140]}{suffix}'
-            suffix += 1
-        return PendingRegistration.objects.create(
+        return create_pending_registration(
+            username=base_username,
+            auto_username=True,
             business_name=self.cleaned_data['business_name'],
             industry=self.cleaned_data['industry'],
             timezone='Asia/Karachi',
-            username=username,
             first_name=first_name,
             last_name=last_name,
             email=email,

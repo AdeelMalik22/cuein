@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.exceptions import ValidationError
@@ -66,6 +66,16 @@ class SignupView(PublicAuthAPIView):
             with transaction.atomic():
                 registration = serializer.save()
                 send_email_verification(registration)
+        except SignupConflictError:
+            return Response(
+                {'username': ['This username is already in use.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except IntegrityError:
+            return Response(
+                {'username': ['This username is already in use.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except EmailVerificationDeliveryError:
             return Response(
                 {'detail': 'We could not send the verification code. Please try again in a moment.'},
