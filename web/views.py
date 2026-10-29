@@ -44,7 +44,7 @@ from core.password_reset import (
     send_password_reset_code,
 )
 from core.email_campaigns import campaign_audience_summary, campaign_recipient_contacts
-from core.mail_security import encrypt_mail_secret
+from core.mail_security import encrypt_mail_secret, verify_google_pubsub_request
 from core.mail_services import (
     MailProviderError,
     add_internal_note,
@@ -137,6 +137,14 @@ def safe_post_redirect(request, fallback):
     if candidate.startswith('/') and not candidate.startswith('//'):
         return candidate
     return fallback
+
+
+def _csv_cell(value):
+    """Keep spreadsheet programs from executing exported user data."""
+    value = '' if value is None else str(value)
+    if value.lstrip().startswith(('=', '+', '-', '@')):
+        return f"'{value}"
+    return value
 
 
 class BrowserAuthRateLimitMixin:
@@ -977,7 +985,7 @@ class LeadExportView(TenantWebMixin, View):
             'quoted_price', 'assigned_user', 'lost_reason', 'created_at', 'updated_at',
         ))
         for lead in self.get_queryset().iterator():
-            writer.writerow((
+            writer.writerow(tuple(_csv_cell(value) for value in (
                 lead.customer_name,
                 lead.phone,
                 lead.email,
@@ -989,7 +997,7 @@ class LeadExportView(TenantWebMixin, View):
                 lead.lost_reason,
                 lead.created_at.isoformat(),
                 lead.updated_at.isoformat(),
-            ))
+            )))
         return response
 
 
@@ -1227,6 +1235,8 @@ class MailboxWebhookView(View):
         provider = kwargs['provider']
         if provider not in (MailboxConnection.Provider.GMAIL, MailboxConnection.Provider.MICROSOFT):
             return HttpResponse(status=404)
+        if provider == MailboxConnection.Provider.GMAIL and not verify_google_pubsub_request(request):
+            return JsonResponse({'detail': 'Invalid Gmail notification.'}, status=401)
         try:
             payload = json.loads(request.body.decode('utf-8') or '{}')
         except (TypeError, ValueError):

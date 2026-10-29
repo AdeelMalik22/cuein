@@ -2,9 +2,11 @@
 
 import base64
 import imaplib
+import ipaddress
 import json
 import re
 import smtplib
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -39,6 +41,28 @@ from .models import (
 
 class MailProviderError(Exception):
     """A provider request or mailbox configuration failed."""
+
+
+def _public_mail_host(host, port):
+    """Reject literal or DNS-resolved private destinations for IMAP/SMTP."""
+    host = (host or '').strip().rstrip('.')
+    if not host or '\x00' in host or len(host) > 253:
+        raise MailProviderError('A valid public IMAP/SMTP host is required.')
+    try:
+        addresses = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            results = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as error:
+            raise MailProviderError('The IMAP/SMTP host could not be resolved.') from error
+        addresses = {
+            ipaddress.ip_address(result[4][0])
+            for result in results
+            if result[4] and result[4][0]
+        }
+    if not addresses or any(not address.is_global for address in addresses):
+        raise MailProviderError('Private or local IMAP/SMTP destinations are not allowed.')
+    return host
 
 
 def normalize_subject(subject):
@@ -404,8 +428,9 @@ def _imap_messages(connection, since):
     password = decrypt_mail_secret(connection.password_secret)
     if not connection.imap_host or not username or not password:
         raise MailProviderError('IMAP host and credentials are required.')
+    imap_host = _public_mail_host(connection.imap_host, connection.imap_port)
     try:
-        client = imaplib.IMAP4_SSL(connection.imap_host, connection.imap_port) if connection.imap_use_ssl else imaplib.IMAP4(connection.imap_host, connection.imap_port)
+        client = imaplib.IMAP4_SSL(imap_host, connection.imap_port) if connection.imap_use_ssl else imaplib.IMAP4(imap_host, connection.imap_port)
     except (OSError, imaplib.IMAP4.error) as error:
         raise MailProviderError(f'Could not connect to IMAP: {error}') from error
     try:
@@ -683,8 +708,9 @@ def _send_smtp(connection, mime_message):
     password = decrypt_mail_secret(connection.password_secret)
     if not connection.smtp_host or not username or not password:
         raise MailProviderError('SMTP host and credentials are required.')
+    smtp_host = _public_mail_host(connection.smtp_host, connection.smtp_port)
     try:
-        client = smtplib.SMTP(connection.smtp_host, connection.smtp_port, timeout=30)
+        client = smtplib.SMTP(smtp_host, connection.smtp_port, timeout=30)
     except (OSError, smtplib.SMTPException) as error:
         raise MailProviderError(f'Could not connect to SMTP: {error}') from error
     try:

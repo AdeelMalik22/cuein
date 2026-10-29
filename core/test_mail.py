@@ -1,9 +1,9 @@
 from email.message import EmailMessage as MimeMessage
 
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
 
-from .mail_security import decrypt_mail_secret, encrypt_mail_secret
-from .mail_services import normalize_subject, parse_rfc822
+from .mail_security import decrypt_mail_secret, encrypt_mail_secret, verify_google_pubsub_request
+from .mail_services import MailProviderError, _public_mail_host, normalize_subject, parse_rfc822
 
 
 class MailServiceTests(SimpleTestCase):
@@ -32,3 +32,16 @@ class MailServiceTests(SimpleTestCase):
         self.assertEqual(parsed['references'], ['<message-0@example.com>'])
         self.assertEqual(parsed['from_email'], 'customer@example.com')
         self.assertEqual(parsed['text_body'], 'Please call me back.')
+
+    def test_private_mail_hosts_are_rejected(self):
+        with self.assertRaises(MailProviderError):
+            _public_mail_host('127.0.0.1', 993)
+
+    def test_public_literal_mail_hosts_are_allowed(self):
+        self.assertEqual(_public_mail_host('8.8.8.8', 993), '8.8.8.8')
+
+    @override_settings(GMAIL_PUBSUB_AUDIENCE='https://app.example.com/mail/webhooks/gmail/')
+    def test_gmail_pubsub_requires_authenticated_push_headers(self):
+        request = RequestFactory().post('/mail/webhooks/gmail/', data=b'{}', content_type='application/json')
+
+        self.assertFalse(verify_google_pubsub_request(request))

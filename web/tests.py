@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from core.models import Business, EmailCampaign, PasswordResetRequest, PendingRegistration, User
 from followups.models import FollowUpTask, Notification
 from leads.models import Activity, Lead, Product, SiteVisit
-from web.views import DashboardView
+from web.views import DashboardView, _csv_cell
 
 
 ONE_PIXEL_PNG = base64.b64decode(
@@ -46,6 +46,12 @@ class LoginPageTests(SimpleTestCase):
         self.assertContains(response, 'aria-label="Show password"')
         self.assertContains(response, 'web/app.js')
         self.assertContains(response, reverse('web:password-reset-request'))
+
+
+class CsvExportSafetyTests(SimpleTestCase):
+    def test_formula_like_values_are_neutralized(self):
+        self.assertEqual(_csv_cell('=HYPERLINK("https://example.com")'), "'=HYPERLINK(\"https://example.com\")")
+        self.assertEqual(_csv_cell('Ayesha Khan'), 'Ayesha Khan')
 
     @override_settings(
         AUTHENTICATION_BACKENDS=('web.tests.RejectingAuthenticationBackend',),
